@@ -61,7 +61,7 @@ def run():
     # scale_pos_weight: XGBoost binary:logistic treats label=1 as positive.
     # label=1=pathogenic is the MAJORITY here, so spw < 1 to penalise
     # over-predicting pathogenic and force the model to also learn benign.
-    spw = n_ben / max(n_pat, 1)
+    spw = 1.0
     print(f"\nBenign={n_ben:,}  Pathogenic={n_pat:,}  scale_pos_weight={spw:.4f}")
 
     dtrain = xgb.DMatrix(X_tr, label=y_tr, feature_names=feat_cols)

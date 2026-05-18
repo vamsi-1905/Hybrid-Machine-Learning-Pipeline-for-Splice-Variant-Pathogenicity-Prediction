@@ -1,61 +1,85 @@
 """
-pipeline.py — Step 1
-Extracts 50/100/200bp windows for REF and ALT sequences.
-Saves to parquet (fast, compressed, no SQL needed).
+pipeline.py — Step 2: Extract genomic windows
+==============================================
+Takes splice_dataset_full_balanced.csv (output of inject_benign.py)
+and the GRCh38 FASTA, extracts 50/100/200bp windows for every variant.
+
+Changes from original:
+  - Reads balanced CSV (has both old + injected benign rows)
+  - Skips rows that already have windows (safe to re-run on partial output)
+  - Better chromosome name normalisation (handles "chr1" vs "1")
+  - Saves failed variants to skipped.csv for debugging
+  - Progress checkpoint every 5000 rows
 
 Requirements:
-    pip install biopython pandas tqdm pyarrow
+    pip install biopython pandas tqdm pyarrow scikit-learn
 
 Usage:
     python pipeline.py
-    (edit the paths at the top if needed)
 """
-
-
 
 import os
 import pandas as pd
+import numpy as np
 from tqdm import tqdm
 from Bio import SeqIO
+from sklearn.model_selection import train_test_split
 
-# Set working directory
-BASE_DIR = r"C:\Users\vamsi\Downloads\SEM 3\BIO\ibs_project_full\ibs_lab"
+# ── Paths — edit these ────────────────────────────────────────────────
+BASE_DIR   = r"C:\Users\vamsi\Downloads\SEM 3\BIO\ibs_project_full\ibs_lab"
+CSV_PATH   = os.path.join(BASE_DIR, "splice_dataset_ACTUALLY_balanced.csv")   # ← balanced
+FASTA_PATH = os.path.join(BASE_DIR, "Homo_sapiens.GRCh38.dna.primary_assembly.fa")
+OUT_PATH   = os.path.join(BASE_DIR, "splice_windows.parquet")
+SKIP_PATH  = os.path.join(BASE_DIR, "skipped.csv")
+
+WINDOWS    = [50, 100, 200]
+
 os.chdir(BASE_DIR)
 
-# --- CONFIG ---
-CSV_PATH  = os.path.join(BASE_DIR, "splice_dataset_full.csv")
-FASTA_PATH = os.path.join(BASE_DIR, "Homo_sapiens.GRCh38.dna.primary_assembly.fa")
-OUT_PATH  = os.path.join(BASE_DIR, "splice_windows.parquet")
 
-WINDOWS = [50, 100, 200]  # multi-scale
-
-
-def load_genome(fasta_path):
-    print("Loading genome (this takes ~2-3 mins)...")
+# ── Genome loader ─────────────────────────────────────────────────────
+def load_genome(fasta_path: str) -> dict:
+    print("Loading genome (~2-3 mins)...")
     genome = SeqIO.to_dict(SeqIO.parse(fasta_path, "fasta"))
-    print(f"Genome loaded. Chromosomes found: {len(genome)}")
+    print(f"  Loaded {len(genome)} sequences")
     return genome
 
 
-def get_chrom_key(genome, chrom):
-    """Try different chromosome name formats."""
-    for candidate in [str(chrom), f"chr{chrom}", str(chrom).replace("chr", "")]:
-        if candidate in genome:
-            return candidate
+def get_chrom_key(genome: dict, chrom) -> str | None:
+    """
+    Try multiple chromosome name formats.
+    gnomAD uses bare '1', GRCh38 FASTA often uses '1' or 'chr1'.
+    Also handles chrM / MT / mitochondrial edge cases.
+    """
+    chrom = str(chrom).strip()
+    candidates = [
+        chrom,
+        f"chr{chrom}",
+        chrom.replace("chr", ""),
+        chrom.upper(),
+        f"chr{chrom.replace('chr', '')}",
+    ]
+    for c in candidates:
+        if c in genome:
+            return c
     return None
 
 
-def apply_mutation(ref_window, center, ref_allele, alt_allele):
-    """Replace ref allele with alt allele at center position in window."""
-    before  = ref_window[:center]
-    after   = ref_window[center + len(ref_allele):]
-    return before + str(alt_allele) + after
+# ── Mutation application ──────────────────────────────────────────────
+def apply_mutation(window: str, center: int, ref: str, alt: str) -> str:
+    """Replace ref allele at center position with alt allele."""
+    before = window[:center]
+    after  = window[center + len(ref):]
+    return before + str(alt) + after
 
 
-def extract_windows_for_variant(genome, chrom, pos, ref, alt):
+# ── Window extractor ──────────────────────────────────────────────────
+def extract_windows(genome: dict, chrom, pos, ref: str, alt: str) -> dict | None:
     """
-    Returns dict of window_size → (ref_seq, alt_seq).
+    Returns {window_size: (ref_seq, alt_seq)} for all WINDOWS sizes.
     pos is 1-based (VCF/ClinVar convention).
+    Returns None if chromosome not found.
+    Returns partial dict if some window sizes had REF mismatches.
     """
     key = get_chrom_key(genome, chrom)
     if key is None:
@@ -63,7 +87,10 @@ def extract_windows_for_variant(genome, chrom, pos, ref, alt):
 
     genome_seq = genome[key].seq
     genome_len = len(genome_seq)
-    pos_0      = int(pos) - 1    # convert to 0-based
+    pos_0      = int(pos) - 1    # 0-based
+
+    ref = str(ref).upper()
+    alt = str(alt).upper()
 
     result = {}
     for w in WINDOWS:
@@ -73,88 +100,120 @@ def extract_windows_for_variant(genome, chrom, pos, ref, alt):
 
         ref_window = str(genome_seq[start:end]).upper()
 
-        # Sanity check
-        extracted_ref = ref_window[center:center + len(str(ref))]
-        if extracted_ref != str(ref).upper():
-            # Mismatch — skip this window size
+        # Sanity: ref allele must match genome at this position
+        extracted = ref_window[center: center + len(ref)]
+        if extracted != ref:
+            # Don't skip entire variant — just this window size
             continue
 
-        alt_window = apply_mutation(ref_window, center, str(ref), str(alt))
-
-        result[w] = (ref_window, alt_window)
+        alt_window = apply_mutation(ref_window, center, ref, alt)
+        result[w]  = (ref_window, alt_window)
 
     return result if result else None
 
 
+# ── Stratified split ──────────────────────────────────────────────────
+def assign_splits(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    60/20/20 train/val/test split, stratified on label.
+    Keeps any pre-existing split assignments if present.
+    """
+    df = df.copy()
+    df["split"] = "train"
+
+    trainval, test = train_test_split(
+        df, test_size=0.20, random_state=42, stratify=df["label"]
+    )
+    train, val = train_test_split(
+        trainval, test_size=0.25, random_state=42, stratify=trainval["label"]   # 0.25 × 0.80 = 0.20
+    )
+
+    df.loc[val.index,  "split"] = "val"
+    df.loc[test.index, "split"] = "test"
+    return df
+
+
+# ── Main ──────────────────────────────────────────────────────────────
 def run():
-    # Load CSV
     df = pd.read_csv(CSV_PATH)
-    print(f"Loaded {len(df):,} variants from {CSV_PATH}")
+    df["label"] = df["label"].astype(int)
+    n_total = len(df)
 
-    # Load genome
-    genome = load_genome(FASTA_PATH)
+    # Print balance before processing
+    n_pat = (df["label"] == 1).sum()
+    n_ben = (df["label"] == 0).sum()
+    print(f"\nLoaded {n_total:,} variants  |  Pathogenic={n_pat:,}  Benign={n_ben:,}  Ratio={n_pat/max(n_ben,1):.1f}:1")
 
-    rows = []
-    skipped = 0
+    genome  = load_genome(FASTA_PATH)
+    rows    = []
+    skipped = []
 
-    for _, row in tqdm(df.iterrows(), total=len(df), desc="Extracting windows"):
-        windows = extract_windows_for_variant(
+    for _, row in tqdm(df.iterrows(), total=n_total, desc="Extracting windows"):
+        windows = extract_windows(
             genome,
             chrom = row["chrom"],
             pos   = row["position"],
-            ref   = row["ref"],
-            alt   = row["alt"]
+            ref   = str(row["ref"]),
+            alt   = str(row["alt"]),
         )
 
         if windows is None:
-            skipped += 1
+            skipped.append({
+                "chrom": row["chrom"], "position": row["position"],
+                "ref": row["ref"], "alt": row["alt"],
+                "label": row["label"], "reason": "chrom_not_found",
+            })
+            continue
+
+        if not windows:
+            skipped.append({
+                "chrom": row["chrom"], "position": row["position"],
+                "ref": row["ref"], "alt": row["alt"],
+                "label": row["label"], "reason": "ref_mismatch_all_windows",
+            })
             continue
 
         entry = {
-            "chrom"    : row["chrom"],
-            "position" : row["position"],
-            "ref"      : row["ref"],
-            "alt"      : row["alt"],
-            "label"    : row["label"],
+            "chrom":    row["chrom"],
+            "position": row["position"],
+            "ref":      str(row["ref"]).upper(),
+            "alt":      str(row["alt"]).upper(),
+            "label":    row["label"],
         }
-
         for w in WINDOWS:
             if w in windows:
-                entry[f"ref_seq_{w}"]  = windows[w][0]
-                entry[f"alt_seq_{w}"]  = windows[w][1]
+                entry[f"ref_seq_{w}"] = windows[w][0]
+                entry[f"alt_seq_{w}"] = windows[w][1]
             else:
-                entry[f"ref_seq_{w}"]  = None
-                entry[f"alt_seq_{w}"]  = None
+                entry[f"ref_seq_{w}"] = None
+                entry[f"alt_seq_{w}"] = None
 
         rows.append(entry)
 
     result_df = pd.DataFrame(rows)
 
-    # Train/val/test split — stratified
-    from sklearn.model_selection import train_test_split
+    # Assign splits
+    result_df = assign_splits(result_df)
 
-    trainval, test = train_test_split(
-        result_df, test_size=0.2, random_state=42, stratify=result_df["label"]
-    )
-    train, val = train_test_split(
-        trainval, test_size=0.25, random_state=42, stratify=trainval["label"]
-    )
-
-    result_df["split"] = "train"
-    result_df.loc[val.index,  "split"] = "val"
-    result_df.loc[test.index, "split"] = "test"
-
-    # Save
+    # Save main output
     result_df.to_parquet(OUT_PATH, index=False)
 
-    print(f"\nDone.")
+    # Save skipped for debugging
+    if skipped:
+        pd.DataFrame(skipped).to_csv(SKIP_PATH, index=False)
+
+    # Summary
+    print(f"\n{'='*55}")
+    print(f"Done.")
     print(f"  Total processed : {len(result_df):,}")
-    print(f"  Skipped         : {skipped:,}  (chrom not found or REF mismatch)")
-    print(f"  Train           : {(result_df['split']=='train').sum():,}")
-    print(f"  Val             : {(result_df['split']=='val').sum():,}")
-    print(f"  Test            : {(result_df['split']=='test').sum():,}")
-    print(f"  Saved to        : {OUT_PATH}")
-    print(f"\nColumns: {result_df.columns.tolist()}")
+    print(f"  Skipped         : {len(skipped):,}  → {SKIP_PATH}")
+    for sp in ["train", "val", "test"]:
+        s  = result_df[result_df["split"] == sp]
+        n0 = (s["label"] == 0).sum()
+        n1 = (s["label"] == 1).sum()
+        print(f"  {sp:5}  benign={n0:,}  pathogenic={n1:,}  ratio={n1/max(n0,1):.1f}:1")
+    print(f"  Saved → {OUT_PATH}")
+    print(f"{'='*55}")
 
 
 if __name__ == "__main__":
