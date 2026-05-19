@@ -1,40 +1,50 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect } from "react";
 
 const API = "http://localhost:8000";
 
-/* ════════════════════════════════════════════════════════
-   DESIGN: Clinical-lab noir. Think electron microscope
-   meets Reuters terminal. Monochrome base with a single
-   surgical accent. Every pixel earns its place.
-   ════════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════════
+   SPLICE VARIANT LAB  —  Scientific Instrument Aesthetic
+   Deep void · Phosphor amber · Sequence green
+═══════════════════════════════════════════════════════════ */
 
-const T = {
-  bg:      "#080a0f",
-  paper:   "#0c0f17",
-  lift:    "#111520",
-  ridge:   "#171c28",
-  wire:    "#1e2535",
-  dim:     "#2a3248",
-  muted:   "#4a5568",
-  ghost:   "#64748b",
-  soft:    "#94a3b8",
-  text:    "#e2e8f0",
-  bright:  "#f1f5f9",
-  lime:    "#a3e635",     // single vivid accent — lab readout green
-  limeDim: "#a3e63520",
-  limeWire:"#a3e63550",
-  red:     "#f87171",
-  redDim:  "#f8717120",
-  amber:   "#fbbf24",
-  blue:    "#38bdf8",
-  purple:  "#a78bfa",
+const C = {
+  void:      "#04050a",
+  abyss:     "#07090f",
+  deep:      "#0b0e18",
+  surface:   "#0e1220",
+  raised:    "#131828",
+  border:    "#1a2135",
+  dim:       "#24304a",
+  muted:     "#3a4f6a",
+  ghost:     "#58718a",
+  slate:     "#7a90a8",
+  silver:    "#a8bcd0",
+  cloud:     "#d4e0ec",
+  white:     "#edf4fc",
+  amber:     "#e8a030",
+  amberDim:  "#e8a03022",
+  seq:       "#22d97a",
+  seqDim:    "#22d97a18",
+  red:       "#e05050",
+  redDim:    "#e0505020",
+  teal:      "#20b8d0",
+  tealDim:   "#20b8d018",
+  purple:    "#9070e8",
+  purpleDim: "#9070e820",
+  orange:    "#e87040",
+};
+
+const F = {
+  display: "'EB Garamond','Playfair Display',Georgia,serif",
+  mono:    "'Fira Code','Cascadia Code','SF Mono',monospace",
+  sans:    "'DM Sans','Outfit',system-ui,sans-serif",
 };
 
 const MODES = [
-  { id:"xgb",          label:"XGBoost",      tag:"k-mer",    glyph:"▦" },
-  { id:"dnabert",      label:"DNABERT-2",    tag:"sequence", glyph:"◈" },
-  { id:"ensemble",     label:"Ensemble",     tag:"fusion",   glyph:"⊕" },
-  { id:"splice_sites", label:"Splice Sites", tag:"PWM",      glyph:"⌁" },
+  { id:"xgb",          label:"XGBoost",      sub:"k-mer",        icon:"▦", color:C.amber  },
+  { id:"dnabert",      label:"DNABERT-2",    sub:"sequence",     icon:"◈", color:C.seq    },
+  { id:"ensemble",     label:"Ensemble",     sub:"fusion",       icon:"⊕", color:C.teal   },
+  { id:"splice_sites", label:"Splice Sites", sub:"PWM+ESE+BP",   icon:"⌁", color:C.purple },
 ];
 
 const EX = {
@@ -42,241 +52,305 @@ const EX = {
   ref_seq:"AGCTGATCGATCGATCGATCGGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCG",
 };
 
-/* ── fonts ─────────────────────────────────────────────────────── */
-const DIS = "'Instrument Serif','Georgia',serif";
-const MON = "'TX-02','Berkeley Mono','Fira Code','JetBrains Mono',monospace";
-const SAN = "'Mona Sans','Geist','DM Sans',sans-serif";
+/* ── tiny helpers ─────────────────────────────────────────── */
+const clamp  = (v,mn,mx) => Math.min(Math.max(v,mn),mx);
+const baseC  = b => ({A:C.red,T:C.amber,G:C.seq,C:C.teal}[b?.toUpperCase()] ?? C.ghost);
+const sigC   = s => s?.startsWith("Strong") ? C.red : s?.startsWith("Moderate") ? C.amber : s?.startsWith("Low") ? C.teal : C.seq;
+const sevC   = s => ({critical:C.red,high:C.amber,moderate:C.orange,low:C.teal,minimal:C.ghost}[s] ?? C.ghost);
+const mutC   = t => ({SNV:C.amber,Deletion:C.red,Insertion:C.seq,MNV:C.purple}[t] ?? C.ghost);
+const pathC  = s => ({high:C.red,moderate:C.amber,low:C.teal,minimal:C.ghost}[s] ?? C.ghost);
 
-/* ── helpers ───────────────────────────────────────────────────── */
-const sigColor = s =>
-  s?.startsWith("Strong") ? T.red :
-  s?.startsWith("Moderate") ? T.amber :
-  s?.startsWith("Weak")||s?.startsWith("Low") ? T.blue :
-  T.lime;
-
-const mutColor = t =>
-  t==="SNV" ? T.blue : t==="Deletion" ? T.red : t==="Insertion" ? T.amber : T.purple;
-
-/* ── animated number ───────────────────────────────────────────── */
-function Num({ to, dur=800, dec=0 }) {
-  const [v,sv] = useState(0);
+/* ── animated counter ─────────────────────────────────────── */
+function Ticker({ to, dur=900, dec=0 }) {
+  const [v, sv] = useState(0);
   useEffect(() => {
     const s = Date.now();
-    const tick = () => {
-      const p = Math.min((Date.now()-s)/dur, 1);
-      const e = 1 - Math.pow(1-p, 3);
-      sv(to * e);
-      if (p < 1) requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
-  }, [to]);
+    const f = () => { const p=Math.min((Date.now()-s)/dur,1); sv(to*(1-Math.pow(1-p,4))); p<1&&requestAnimationFrame(f); };
+    requestAnimationFrame(f);
+  }, [to, dur]);
   return <>{v.toFixed(dec)}</>;
 }
 
-/* ── scan-line bar ─────────────────────────────────────────────── */
-function Bar({ val, max=1, color=T.lime, h=3, delay=0 }) {
+/* ── bar ──────────────────────────────────────────────────── */
+function Bar({ val, max=1, color=C.amber, h=3, delay=0, label }) {
   const [w, sw] = useState(0);
-  useEffect(() => {
-    const t = setTimeout(() => sw((val/max)*100), 60 + delay);
-    return () => clearTimeout(t);
-  }, [val, max]);
+  useEffect(() => { const t=setTimeout(()=>sw(clamp(val/max,0,1)*100),80+delay); return ()=>clearTimeout(t); },[val,max,delay]);
   return (
-    <div style={{ height:h, background:T.dim, borderRadius:1, overflow:"hidden" }}>
-      <div style={{
-        height:"100%", width:`${w}%`, background:color, borderRadius:1,
-        transition:`width 0.9s cubic-bezier(.16,1,.3,1) ${delay}ms`,
-        boxShadow:`0 0 6px ${color}66`,
-      }}/>
-    </div>
-  );
-}
-
-/* ── chip/badge ────────────────────────────────────────────────── */
-function Chip({ label, color=T.ghost }) {
-  return (
-    <span style={{
-      display:"inline-block",
-      fontFamily:MON, fontSize:9, letterSpacing:1.5,
-      fontWeight:600, textTransform:"uppercase",
-      padding:"3px 8px", borderRadius:2,
-      background:`${color}18`, border:`1px solid ${color}55`,
-      color, lineHeight:1,
-    }}>{label}</span>
-  );
-}
-
-/* ── section label ─────────────────────────────────────────────── */
-function SectionLabel({ children }) {
-  return (
-    <div style={{
-      fontFamily:MON, fontSize:8, letterSpacing:3,
-      color:T.muted, textTransform:"uppercase", marginBottom:10,
-      display:"flex", alignItems:"center", gap:8,
-    }}>
-      <div style={{ height:1, width:16, background:T.wire }}/>
-      {children}
-      <div style={{ height:1, flex:1, background:T.wire }}/>
-    </div>
-  );
-}
-
-/* ── big gauge ─────────────────────────────────────────────────── */
-function Gauge({ prob, isPath }) {
-  const r = 44, c = 2*Math.PI*r;
-  const color = isPath ? T.red : T.lime;
-  return (
-    <div style={{ position:"relative", width:108, height:108, flexShrink:0 }}>
-      {/* tick marks */}
-      <svg width={108} height={108} viewBox="0 0 108 108"
-           style={{ position:"absolute", inset:0, transform:"rotate(-90deg)" }}>
-        {/* background arc */}
-        <circle cx={54} cy={54} r={r} fill="none" stroke={T.dim} strokeWidth={7}/>
-        {/* progress arc */}
-        <circle cx={54} cy={54} r={r} fill="none" stroke={color} strokeWidth={7}
-          strokeDasharray={c}
-          strokeDashoffset={c*(1-prob)}
-          strokeLinecap="butt"
-          style={{ transition:"stroke-dashoffset 1.1s cubic-bezier(.16,1,.3,1)" }}/>
-      </svg>
-      {/* centre */}
-      <div style={{
-        position:"absolute", inset:0,
-        display:"flex", flexDirection:"column",
-        alignItems:"center", justifyContent:"center",
-      }}>
-        <span style={{
-          fontFamily:MON, fontWeight:700, fontSize:20,
-          color, lineHeight:1,
-          textShadow:`0 0 16px ${color}`,
-        }}>
-          <Num to={Math.round(prob*100)} dec={0}/>%
-        </span>
-        <span style={{ fontFamily:MON, fontSize:7, color:T.muted, letterSpacing:2, marginTop:3 }}>
-          PROB
-        </span>
+    <div>
+      {label && (
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+          <span style={{fontFamily:F.mono,fontSize:8,color:C.ghost,letterSpacing:1}}>{label}</span>
+          <span style={{fontFamily:F.mono,fontSize:9,color,fontWeight:600}}>{(val*100).toFixed(1)}%</span>
+        </div>
+      )}
+      <div style={{height:h,background:C.dim,borderRadius:1,overflow:"hidden"}}>
+        <div style={{height:"100%",width:`${w}%`,borderRadius:1,
+          background:`linear-gradient(90deg,${color}99,${color})`,
+          boxShadow:`0 0 8px ${color}55`,
+          transition:`width 1s cubic-bezier(.16,1,.3,1) ${delay}ms`}}/>
       </div>
     </div>
   );
 }
 
-/* ── delta chip ────────────────────────────────────────────────── */
-function Delta({ v }) {
-  const up = v >= 0;
-  const col = up ? T.lime : T.red;
+/* ── tag ──────────────────────────────────────────────────── */
+function Tag({ label, color=C.ghost, small }) {
   return (
-    <span style={{
-      fontFamily:MON, fontSize:10, fontWeight:700, color:col,
-      background:`${col}15`, border:`1px solid ${col}44`,
-      borderRadius:2, padding:"2px 7px",
-    }}>{up?"+":""}{v.toFixed(3)}</span>
+    <span style={{fontFamily:F.mono,fontSize:small?7:8,letterSpacing:1.5,fontWeight:700,
+      textTransform:"uppercase",padding:small?"2px 6px":"3px 9px",borderRadius:2,
+      background:`${color}18`,border:`1px solid ${color}44`,color,lineHeight:1,whiteSpace:"nowrap"}}>
+      {label}
+    </span>
   );
 }
 
-/* ── kmer visual ────────────────────────────────────────────────── */
-function KmerView({ ref_kmer, alt_kmer }) {
+/* ── section rule ─────────────────────────────────────────── */
+function Sep({ label, color=C.muted }) {
+  return (
+    <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+      <div style={{height:1,width:12,background:C.border}}/>
+      <span style={{fontFamily:F.mono,fontSize:7,letterSpacing:3,color,textTransform:"uppercase"}}>{label}</span>
+      <div style={{height:1,flex:1,background:C.border}}/>
+    </div>
+  );
+}
+
+/* ── circular gauge ───────────────────────────────────────── */
+function Gauge({ prob, isPath, size=108 }) {
+  const R=42, circ=2*Math.PI*R, color=isPath?C.red:C.seq;
+  const [dash,sd]=useState(circ);
+  useEffect(()=>{ const t=setTimeout(()=>sd(circ*(1-prob)),120); return()=>clearTimeout(t); },[prob]);
+  return (
+    <div style={{position:"relative",width:size,height:size,flexShrink:0}}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}
+           style={{position:"absolute",inset:0,transform:"rotate(-90deg)"}}>
+        <circle cx={size/2} cy={size/2} r={R} fill="none" stroke={C.dim} strokeWidth={6}/>
+        <circle cx={size/2} cy={size/2} r={R} fill="none" stroke={color} strokeWidth={6}
+          strokeDasharray={circ} strokeDashoffset={dash} strokeLinecap="round"
+          style={{transition:"stroke-dashoffset 1.1s cubic-bezier(.16,1,.3,1)",filter:`drop-shadow(0 0 4px ${color})`}}/>
+      </svg>
+      <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
+        <span style={{fontFamily:F.mono,fontWeight:700,fontSize:18,color,lineHeight:1,textShadow:`0 0 20px ${color}88`}}>
+          <Ticker to={Math.round(prob*100)}/><span style={{fontSize:11}}>%</span>
+        </span>
+        <span style={{fontFamily:F.mono,fontSize:6,color:C.ghost,letterSpacing:2,marginTop:2}}>PROB</span>
+      </div>
+    </div>
+  );
+}
+
+/* ── delta badge ──────────────────────────────────────────── */
+function Delta({ v }) {
+  const col = v > 0.05?C.red : v < -0.05?C.seq : C.ghost;
+  return (
+    <span style={{fontFamily:F.mono,fontSize:10,fontWeight:700,color:col,
+      background:`${col}18`,border:`1px solid ${col}44`,borderRadius:2,padding:"2px 7px"}}>
+      {v>=0?"+":""}{v.toFixed(3)}
+    </span>
+  );
+}
+
+/* ── k-mer diff ───────────────────────────────────────────── */
+function KmerDiff({ ref_kmer, alt_kmer }) {
   if (!ref_kmer && !alt_kmer) return null;
-  const render = (seq, isAlt) => {
-    if (!seq) return <span style={{ color:T.muted, fontFamily:MON, fontSize:11 }}>—</span>;
+  const render = (seq, other, isAlt) => {
+    if (!seq) return <span style={{color:C.muted,fontFamily:F.mono,fontSize:11}}>—</span>;
     return (
-      <span style={{ fontFamily:MON, fontSize:11, letterSpacing:2 }}>
-        {seq.split("").map((c,i) => {
-          const changed = ref_kmer && alt_kmer && ref_kmer[i] !== alt_kmer[i];
-          return (
-            <span key={i} style={{
-              color: changed && isAlt ? T.amber : T.soft,
-              background: changed && isAlt ? `${T.amber}20` : "transparent",
-              borderRadius:1,
-            }}>{c}</span>
-          );
+      <span style={{fontFamily:F.mono,fontSize:11,letterSpacing:2.5}}>
+        {seq.split("").map((c,i)=>{
+          const diff=other&&other[i]!==c;
+          return <span key={i} style={{color:diff&&isAlt?"#000":baseC(c),background:diff&&isAlt?baseC(c):"transparent",borderRadius:1,padding:"0 1px"}}>{c}</span>;
         })}
       </span>
     );
   };
   return (
-    <div style={{
-      marginTop:10, background:T.bg, borderRadius:4, padding:"10px 14px",
-      border:`1px solid ${T.wire}`,
-    }}>
-      {[["REF", ref_kmer, false],["ALT", alt_kmer, true]].map(([lbl, seq, isAlt]) => (
-        <div key={lbl} style={{ display:"flex", gap:12, alignItems:"center", marginBottom: lbl==="REF"?5:0 }}>
-          <span style={{ fontFamily:MON, fontSize:8, color:T.muted, width:24, letterSpacing:1 }}>{lbl}</span>
-          {render(seq, isAlt)}
+    <div style={{background:C.abyss,borderRadius:4,padding:"10px 14px",border:`1px solid ${C.border}`,marginTop:8}}>
+      {[["REF",ref_kmer,false],["ALT",alt_kmer,true]].map(([lbl,seq,isAlt])=>(
+        <div key={lbl} style={{display:"flex",gap:12,alignItems:"center",marginBottom:lbl==="REF"?5:0}}>
+          <span style={{fontFamily:F.mono,fontSize:7,color:C.ghost,width:24,letterSpacing:1}}>{lbl}</span>
+          {render(seq,lbl==="REF"?alt_kmer:ref_kmer,isAlt)}
+        </div>
+      ))}
+      {ref_kmer&&alt_kmer&&ref_kmer!==alt_kmer&&(
+        <div style={{marginTop:6,fontFamily:F.mono,fontSize:8,color:C.amber}}>
+          ↑ Highlighted bases changed — altered spliceosome recognition context
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── DNA strip ────────────────────────────────────────────── */
+function DNAStrip({ seq, highlight, maxLen=80 }) {
+  if (!seq) return null;
+  const display = seq.slice(0,maxLen);
+  return (
+    <div style={{fontFamily:F.mono,fontSize:10,letterSpacing:1,lineHeight:1.6,wordBreak:"break-all"}}>
+      {display.split("").map((b,i)=>{
+        const isHL=highlight&&i>=highlight.start&&i<highlight.end;
+        return <span key={i} style={{color:isHL?"#000":baseC(b),background:isHL?baseC(b):"transparent",borderRadius:1}}>{b}</span>;
+      })}
+      {seq.length>maxLen&&<span style={{color:C.muted}}>…+{seq.length-maxLen}bp</span>}
+    </div>
+  );
+}
+
+/* ── site landscape ───────────────────────────────────────── */
+function SiteLandscape({ sites }) {
+  if (!sites?.length) return null;
+  const allPos=sites.map(s=>s.position), minP=Math.min(...allPos), maxP=Math.max(...allPos), span=Math.max(maxP-minP,1);
+  const Track=({items,label})=>{
+    if(!items.length) return null;
+    return (
+      <div style={{marginBottom:10}}>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+          <span style={{fontFamily:F.mono,fontSize:7,color:C.ghost,letterSpacing:1.5}}>{label}</span>
+          <div style={{display:"flex",gap:8}}>
+            {[["DISRUPT",C.red],["CREATED",C.seq],["CRYPTIC",C.purple]].map(([l,c])=>(
+              <span key={l} style={{display:"flex",alignItems:"center",gap:3,fontFamily:F.mono,fontSize:6,color:C.ghost}}>
+                <span style={{width:5,height:5,background:c,display:"inline-block",borderRadius:1}}/>{l}
+              </span>
+            ))}
+          </div>
+        </div>
+        <div style={{position:"relative",height:28,background:C.abyss,border:`1px solid ${C.border}`,borderRadius:3,overflow:"hidden"}}>
+          <div style={{position:"absolute",left:"50%",top:0,width:1,height:"100%",background:C.dim}}/>
+          {items.map((s,i)=>{
+            const x=span>0?((s.position-minP)/span)*86+7:50;
+            const col=s.disrupted?C.red:s.created?C.seq:s.cryptic?C.purple:C.ghost;
+            const ht=Math.max(s.alt_score*26,3);
+            return <div key={i} title={`${s.type} pos ${s.position>=0?"+":""}${s.position}  Δ${s.delta.toFixed(3)}`}
+              style={{position:"absolute",bottom:0,left:`${x}%`,width:3,height:`${ht}px`,background:col,
+                borderRadius:"1px 1px 0 0",transform:"translateX(-50%)",boxShadow:`0 0 6px ${col}88`}}/>;
+          })}
+        </div>
+        <div style={{display:"flex",justifyContent:"space-between",marginTop:2}}>
+          <span style={{fontFamily:F.mono,fontSize:6,color:C.muted}}>{minP>=0?"+":""}{minP}bp</span>
+          <span style={{fontFamily:F.mono,fontSize:6,color:C.amber}}>▼ variant</span>
+          <span style={{fontFamily:F.mono,fontSize:6,color:C.muted}}>{maxP>=0?"+":""}{maxP}bp</span>
+        </div>
+      </div>
+    );
+  };
+  return (
+    <div style={{marginBottom:16,padding:"12px 14px",background:C.deep,borderRadius:5,border:`1px solid ${C.border}`}}>
+      <Sep label="Splice Site Landscape · mini genome view"/>
+      <Track items={sites.filter(s=>s.type==="donor")}    label="5′ Donor sites"/>
+      <Track items={sites.filter(s=>s.type==="acceptor")} label="3′ Acceptor sites"/>
+    </div>
+  );
+}
+
+/* ── ESE panel ────────────────────────────────────────────── */
+function ESEPanel({ findings }) {
+  if (!findings?.length) return null;
+  return (
+    <div style={{marginBottom:14}}>
+      <Sep label="Exonic Splicing Enhancers (ESE) — SR Protein Binding"/>
+      <div style={{fontFamily:F.mono,fontSize:8,color:C.ghost,lineHeight:1.8,marginBottom:10}}>
+        SR proteins (SRSF1–5) bind ESE hexamers within exons to recruit U2AF and stabilise splice site selection.
+        Disruption causes exon skipping; de novo ESE may activate cryptic splicing.
+      </div>
+      {findings.map((f,i)=>(
+        <div key={i} style={{marginBottom:5,padding:"9px 12px",
+          background:f.type==="ESE_disrupted"?C.redDim:C.seqDim,
+          border:`1px solid ${f.type==="ESE_disrupted"?C.red+"44":C.seq+"44"}`,borderRadius:3}}>
+          <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:4}}>
+            <Tag label={f.type==="ESE_disrupted"?"ESE LOST":"ESE GAINED"} color={f.type==="ESE_disrupted"?C.red:C.seq} small/>
+            <span style={{fontFamily:F.mono,fontSize:9,color:C.amber,letterSpacing:1}}>{f.protein}</span>
+            <span style={{fontFamily:F.mono,fontSize:10,color:C.cloud,letterSpacing:2}}>{f.motif}</span>
+          </div>
+          <div style={{fontFamily:F.mono,fontSize:9,color:C.slate,lineHeight:1.7}}>{f.effect}</div>
         </div>
       ))}
     </div>
   );
 }
 
-/* ── site row ───────────────────────────────────────────────────── */
-function SiteRow({ s, idx }) {
-  const [open, setOpen] = useState(false);
-  const tag  = s.disrupted?"DISRUPTED":s.created?"CREATED":s.cryptic?"CRYPTIC":"SHIFTED";
-  const col  = s.disrupted?T.red:s.created?T.lime:s.cryptic?T.amber:T.muted;
-  const pos  = `${s.position>=0?"+":""}${s.position}`;
-
+/* ── Branch point panel ───────────────────────────────────── */
+function BranchPointPanel({ ref_bp, alt_bp }) {
+  if (!ref_bp?.length && !alt_bp?.length) return null;
+  const BPEntry=({bp,label,color})=>(
+    <div style={{flex:1}}>
+      <div style={{fontFamily:F.mono,fontSize:7,color:C.ghost,letterSpacing:1,marginBottom:6}}>{label}</div>
+      {!bp?.length
+        ? <div style={{fontFamily:F.mono,fontSize:9,color:C.muted}}>None found</div>
+        : bp.map((b,i)=>(
+          <div key={i} style={{marginBottom:4,padding:"7px 10px",background:`${color}10`,border:`1px solid ${color}33`,borderRadius:3}}>
+            <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:3}}>
+              <span style={{fontFamily:F.mono,fontSize:10,color,letterSpacing:2}}>{b.seq}</span>
+              <Tag label={`pos ${b.pos>=0?"+":""}${b.pos}`} color={color} small/>
+              <span style={{fontFamily:F.mono,fontSize:8,color:C.ghost}}>score {b.score.toFixed(2)}</span>
+            </div>
+            <div style={{fontFamily:F.mono,fontSize:8,color:C.ghost}}>
+              Branch A at {b.branch_A>=0?"+":""}{b.branch_A} · YNYURAY consensus
+            </div>
+          </div>
+        ))
+      }
+    </div>
+  );
   return (
-    <div style={{
-      background:T.paper,
-      border:`1px solid ${open ? col+"44" : T.wire}`,
-      borderRadius:4,
-      overflow:"hidden",
-      animation:`fadeUp 0.25s ${idx*35}ms both`,
-      transition:"border-color 0.2s",
-    }}>
-      {/* collapsed row */}
-      <div onClick={() => setOpen(v=>!v)} style={{
-        padding:"11px 16px", cursor:"pointer",
-        display:"grid", gridTemplateColumns:"80px 1fr 140px 32px",
-        gap:12, alignItems:"center",
-      }}>
+    <div style={{marginBottom:14}}>
+      <Sep label="Branch Point Adenosine Candidates (18–40nt upstream of acceptor)"/>
+      <div style={{fontFamily:F.mono,fontSize:8,color:C.ghost,lineHeight:1.8,marginBottom:8}}>
+        The branch point A nucleophilically attacks the 5′ splice site phosphate in step 1 of splicing.
+        Consensus: YNYURAY. Mutations here impair lariat formation.
+      </div>
+      <div style={{display:"flex",gap:10}}>
+        <BPEntry bp={ref_bp||[]} label="REF sequence" color={C.seq}/>
+        <div style={{width:1,background:C.border}}/>
+        <BPEntry bp={alt_bp||[]} label="ALT sequence" color={C.amber}/>
+      </div>
+    </div>
+  );
+}
+
+/* ── individual site row ──────────────────────────────────── */
+function SiteRow({ s, idx }) {
+  const [open,setOpen]=useState(false);
+  const tag  = s.disrupted?"DISRUPTED":s.created?"DE NOVO":s.cryptic?"CRYPTIC":"SHIFTED";
+  const col  = s.disrupted?C.red:s.created?C.seq:s.cryptic?C.purple:C.muted;
+  const pos  = `${s.position>=0?"+":""}${s.position}`;
+  return (
+    <div style={{background:open?C.raised:C.surface,border:`1px solid ${open?col+"55":C.border}`,borderRadius:5,overflow:"hidden",
+      animation:`siteIn 0.25s ${idx*30}ms both`,transition:"border-color 0.2s,background 0.2s"}}>
+      <div onClick={()=>setOpen(v=>!v)} style={{padding:"11px 16px",cursor:"pointer",
+        display:"grid",gridTemplateColumns:"110px 1fr 130px 28px",gap:12,alignItems:"center"}}>
         <div>
-          <Chip label={tag} color={col}/>
-          <div style={{ fontFamily:MON, fontSize:8, color:T.muted, marginTop:4, letterSpacing:0.5 }}>
-            {s.type} · {pos}
+          <div style={{display:"flex",gap:5,alignItems:"center",marginBottom:4}}>
+            <Tag label={tag} color={col} small/>
+            {s.canonical&&<Tag label="CANONICAL" color={C.amber} small/>}
+          </div>
+          <div style={{fontFamily:F.mono,fontSize:7,color:C.muted,lineHeight:1.6}}>
+            {s.type} · {pos} · {s.dinucleotide||"—"}
           </div>
         </div>
-
-        {/* score bars */}
         <div>
-          {[["REF", s.ref_score, T.ghost], ["ALT", s.alt_score, col]].map(([l,v,c]) => (
-            <div key={l} style={{ display:"flex", gap:8, alignItems:"center", marginBottom:l==="REF"?4:0 }}>
-              <span style={{ fontFamily:MON, fontSize:8, color:T.muted, width:20 }}>{l}</span>
-              <div style={{ flex:1 }}>
-                <Bar val={v} color={c} h={2}/>
+          {[["REF",s.ref_score,C.ghost],["ALT",s.alt_score,col]].map(([lbl,v,c])=>(
+            <div key={lbl} style={{display:"flex",gap:8,alignItems:"center",marginBottom:lbl==="REF"?3:0}}>
+              <span style={{fontFamily:F.mono,fontSize:7,color:c,width:20}}>{lbl}</span>
+              <div style={{flex:1,height:3,background:C.dim,borderRadius:1,overflow:"hidden"}}>
+                <div style={{height:"100%",width:`${v*100}%`,background:c,borderRadius:1,boxShadow:lbl==="ALT"?`0 0 4px ${c}88`:undefined}}/>
               </div>
-              <span style={{ fontFamily:MON, fontSize:9, color:c, width:32, textAlign:"right" }}>
-                {v.toFixed(2)}
-              </span>
+              <span style={{fontFamily:F.mono,fontSize:8,color:c,width:32,textAlign:"right"}}>{v.toFixed(3)}</span>
             </div>
           ))}
         </div>
-
-        <div style={{ display:"flex", justifyContent:"flex-end" }}>
-          <Delta v={s.delta}/>
-        </div>
-
-        <span style={{ fontFamily:MON, fontSize:10, color:T.muted, textAlign:"center" }}>
-          {open ? "▲" : "▼"}
-        </span>
+        <div style={{display:"flex",justifyContent:"flex-end"}}><Delta v={s.delta}/></div>
+        <span style={{fontFamily:F.mono,fontSize:9,color:C.muted,textAlign:"center"}}>{open?"▲":"▼"}</span>
       </div>
-
-      {/* expanded */}
-      {open && (
-        <div style={{
-          borderTop:`1px solid ${T.wire}`,
-          padding:"12px 16px",
-          animation:"fadeIn 0.18s ease",
-        }}>
-          <KmerView ref_kmer={s.ref_kmer} alt_kmer={s.alt_kmer}/>
-          <div style={{
-            marginTop:10, padding:"12px 14px",
-            background:T.bg, borderRadius:4,
-            borderLeft:`2px solid ${col}`,
-          }}>
-            <SectionLabel>Molecular reasoning</SectionLabel>
-            <p style={{ fontFamily:MON, fontSize:11, color:T.soft, lineHeight:1.9, margin:0 }}>
-              {s.reasoning}
-            </p>
+      {open&&(
+        <div style={{borderTop:`1px solid ${C.border}`,padding:"14px 16px",animation:"fadeIn 0.18s ease"}}>
+          <KmerDiff ref_kmer={s.ref_kmer} alt_kmer={s.alt_kmer}/>
+          <div style={{marginTop:12,padding:"12px 14px",background:C.abyss,borderRadius:4,borderLeft:`2px solid ${col}`}}>
+            <Sep label="Molecular reasoning"/>
+            <p style={{fontFamily:F.mono,fontSize:10,color:C.silver,lineHeight:1.95,margin:0}}>{s.reasoning}</p>
+          </div>
+          <div style={{marginTop:10,display:"flex",gap:8,flexWrap:"wrap"}}>
+            <Tag label={s.bio_consequence} color={col} small/>
+            <Tag label={`pathogenicity: ${s.pathogenicity_contribution}`} color={pathC(s.pathogenicity_contribution)} small/>
           </div>
         </div>
       )}
@@ -284,472 +358,306 @@ function SiteRow({ s, idx }) {
   );
 }
 
-/* ── heatmap landscape ─────────────────────────────────────────── */
-function Landscape({ sites }) {
-  if (!sites?.length) return null;
-  const track = (items, label, color) => {
-    if (!items.length) return null;
-    const minP = Math.min(...items.map(s=>s.position));
-    const maxP = Math.max(...items.map(s=>s.position));
-    const span = Math.max(maxP - minP, 1);
-    return (
-      <div style={{ marginBottom:14 }}>
-        <div style={{ display:"flex", justifyContent:"space-between", marginBottom:5 }}>
-          <span style={{ fontFamily:MON, fontSize:8, color:T.muted, letterSpacing:1.5 }}>{label.toUpperCase()} ({items.length})</span>
-          <div style={{ display:"flex", gap:10 }}>
-            {[["DISRUPTED",T.red],["CREATED",T.lime],["CRYPTIC",T.amber]].map(([l,c])=>(
-              <span key={l} style={{ display:"flex", alignItems:"center", gap:4, fontFamily:MON, fontSize:7, color:T.muted }}>
-                <span style={{ display:"inline-block", width:6, height:6, background:c, borderRadius:1 }}/>
-                {l}
-              </span>
-            ))}
-          </div>
-        </div>
-        <div style={{
-          position:"relative", height:32, background:T.bg,
-          borderRadius:3, border:`1px solid ${T.wire}`,
-          overflow:"hidden",
-        }}>
-          {/* center line */}
-          <div style={{
-            position:"absolute", left:"50%", top:0,
-            width:1, height:"100%", background:T.wire,
-          }}/>
-          {items.map((s,i) => {
-            const xPct = span > 0 ? ((s.position-minP)/span)*88+6 : 50;
-            const c    = s.disrupted?T.red:s.created?T.lime:s.cryptic?T.amber:T.muted;
-            const ht   = Math.max(s.alt_score*30, 4);
-            return (
-              <div key={i} title={`${s.type} pos ${s.position>=0?"+":""}${s.position}  Δ${s.delta.toFixed(3)}`}
-                style={{
-                  position:"absolute", bottom:0, left:`${xPct}%`,
-                  width:3, height:`${ht}px`,
-                  background:c, borderRadius:"1px 1px 0 0",
-                  transform:"translateX(-50%)",
-                  boxShadow:`0 0 5px ${c}88`,
-                }}/>
-            );
-          })}
-        </div>
-        <div style={{ display:"flex", justifyContent:"space-between", marginTop:3 }}>
-          <span style={{ fontFamily:MON, fontSize:7, color:T.muted }}>{minP>=0?"+":""}{minP}bp</span>
-          <span style={{ fontFamily:MON, fontSize:7, color:T.muted }}>0 (variant)</span>
-          <span style={{ fontFamily:MON, fontSize:7, color:T.muted }}>{maxP>=0?"+":""}{maxP}bp</span>
-        </div>
-      </div>
-    );
-  };
-
-  return (
-    <div style={{
-      padding:"14px 16px", background:T.bg,
-      borderRadius:6, border:`1px solid ${T.wire}`,
-      marginBottom:16,
-    }}>
-      <SectionLabel>Splice Site Landscape</SectionLabel>
-      {track(sites.filter(s=>s.type==="donor"), "Donor", T.blue)}
-      {track(sites.filter(s=>s.type==="acceptor"), "Acceptor", T.purple)}
-    </div>
-  );
-}
-
-/* ── feature rules ─────────────────────────────────────────────── */
-function Rules({ r }) {
-  const ref = r.ref?.toUpperCase() || "";
-  const alt = r.alt?.toUpperCase() || "";
-  const mut = r.mutation_type || "";
-  const rules = [
-    { label:"+1G invariant donor",  fired:ref==="G", sev: ref==="G"&&alt!=="G"?"high":"low",
-      desc: ref==="G" ? (alt!=="G"?"REF=G → ALT disrupts invariant +1G of GT donor dinucleotide. >99% conserved; virtually always pathogenic when substituted.":"REF=G preserved in ALT — no disruption at +1G donor position.") : "REF is not G; +1G canonical donor position not directly affected." },
-    { label:"+2T invariant donor",  fired:ref==="T", sev: ref==="T"&&alt!=="T"?"high":"low",
-      desc: ref==="T" ? (alt!=="T"?"REF=T → ALT disrupts +2T of GT donor. Highly conserved; most substitutions abolish splicing.":"REF=T preserved in ALT.") : "REF is not T; +2T donor position not directly affected." },
-    { label:"-2A invariant acceptor", fired:ref==="A", sev: ref==="A"&&alt!=="A"?"high":"low",
-      desc: ref==="A" ? (alt!=="A"?"REF=A → ALT disrupts -2A of AG acceptor dinucleotide. Loss typically causes exon skipping.":"REF=A preserved.") : "REF is not A; -2A acceptor not directly affected." },
-    { label:"GT dinucleotide loss", fired:ref.includes("GT")&&!alt.includes("GT"), sev:"high",
-      desc: ref.includes("GT") ? (alt.includes("GT")?"GT preserved in ALT; donor dinucleotide intact.":"GT present in REF but lost in ALT — potential donor site disruption.") : "GT motif not present in REF allele." },
-    { label:"AG dinucleotide loss", fired:ref.includes("AG")&&!alt.includes("AG"), sev:"high",
-      desc: ref.includes("AG") ? (alt.includes("AG")?"AG preserved in ALT; acceptor dinucleotide intact.":"AG present in REF but lost in ALT — potential acceptor disruption.") : "AG motif not present in REF allele." },
-    { label:"Frameshift risk", fired:(mut==="Insertion"||mut==="Deletion")&&(Math.abs(ref.length-alt.length)%3!==0), sev:"medium",
-      desc: (mut==="Insertion"||mut==="Deletion") ? (Math.abs(ref.length-alt.length)%3!==0 ? `${Math.abs(ref.length-alt.length)}bp frameshift — disrupts reading frame and splice geometry downstream.`:`In-frame indel (${Math.abs(ref.length-alt.length)}bp) — lower frameshift risk but may alter local splice signals.`) : "SNV/MNV — no length change." },
-    { label:"Multi-nucleotide substitution", fired:mut==="MNV", sev:"medium",
-      desc: mut==="MNV" ? "Complex MNV — multiple consecutive positions affected. High risk of disrupting conserved splice site motifs simultaneously." : "Not a multi-nucleotide variant." },
-  ];
-
-  const sevColor = s => s==="high"?T.red:s==="medium"?T.amber:T.wire;
-
-  return (
-    <div style={{ marginTop:2 }}>
-      <SectionLabel>Biological Rule Evaluation</SectionLabel>
-      <p style={{ fontFamily:MON, fontSize:9, color:T.muted, lineHeight:1.7, marginBottom:12 }}>
-        Rules derived from conserved splice site biology. Scores come from ML models, not these rules.
-      </p>
-      {rules.map((f,i) => (
-        <div key={i} style={{
-          marginBottom:6, padding:"10px 12px",
-          background: f.fired ? `${sevColor(f.sev)}10` : T.bg,
-          border:`1px solid ${f.fired ? sevColor(f.sev)+"55" : T.wire}`,
-          borderRadius:4,
-          transition:"all 0.2s",
-        }}>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:5 }}>
-            <span style={{ fontFamily:MON, fontSize:10, color:f.fired?sevColor(f.sev):T.muted }}>
-              {f.fired ? "● " : "○ "}{f.label}
-            </span>
-            {f.fired && <Chip label={f.sev} color={sevColor(f.sev)}/>}
-          </div>
-          <p style={{ fontFamily:MON, fontSize:10, color:T.muted, lineHeight:1.7, margin:0 }}>{f.desc}</p>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/* ── confidence breakdown ──────────────────────────────────────── */
-function Confidence({ prob, thresh }) {
-  const margin = Math.abs(prob - thresh);
-  const certLabel = margin>0.35?"High":margin>0.15?"Medium":"Low";
-  const certColor = margin>0.35?T.lime:margin>0.15?T.amber:T.red;
-  const isPath = prob >= thresh;
-
-  return (
-    <div style={{ marginTop:2 }}>
-      <SectionLabel>Prediction Confidence</SectionLabel>
-      {/* main confidence tile */}
-      <div style={{
-        display:"flex", justifyContent:"space-between", alignItems:"center",
-        padding:"16px 18px",
-        background:T.bg, borderRadius:6,
-        border:`1px solid ${certColor}40`,
-        marginBottom:12,
-      }}>
-        <div>
-          <div style={{ fontFamily:MON, fontSize:8, color:T.muted, letterSpacing:2, marginBottom:4 }}>CONFIDENCE</div>
-          <div style={{ fontFamily:DIS, fontSize:28, color:certColor, lineHeight:1 }}>{certLabel}</div>
-        </div>
-        <div style={{ textAlign:"right" }}>
-          <div style={{ fontFamily:MON, fontSize:8, color:T.muted, letterSpacing:2, marginBottom:4 }}>
-            {isPath?"PATHOGENIC":"BENIGN"}
-          </div>
-          <div style={{ fontFamily:MON, fontSize:24, fontWeight:700, color:isPath?T.red:T.lime }}>
-            {(prob*100).toFixed(1)}%
-          </div>
-        </div>
-      </div>
-
-      {/* margin bar */}
-      <div style={{ marginBottom:12 }}>
-        <div style={{ display:"flex", justifyContent:"space-between", marginBottom:5 }}>
-          <span style={{ fontFamily:MON, fontSize:9, color:T.muted }}>Distance from decision boundary</span>
-          <span style={{ fontFamily:MON, fontSize:9, color:T.blue }}>{(margin*100).toFixed(1)}pp</span>
-        </div>
-        <Bar val={margin} max={0.5} color={T.blue} h={4}/>
-        <p style={{ fontFamily:MON, fontSize:9, color:T.muted, lineHeight:1.7, marginTop:6 }}>
-          {margin < 0.1 ? "Near-boundary — model is uncertain. Treat with caution and run splice site analysis."
-           : margin < 0.25 ? "Moderate margin. Consider ensemble and splice site analysis for confirmation."
-           : "Strong separation from threshold — high model confidence in this call."}
-        </p>
-      </div>
-
-      {/* disclaimer */}
-      <div style={{
-        padding:"10px 12px", background:T.paper, borderRadius:4,
-        border:`1px solid ${T.wire}`,
-        fontFamily:MON, fontSize:9, color:T.muted, lineHeight:1.8,
-      }}>
-        ℹ Confidence reflects margin from tuned threshold, not model calibration. For clinical decisions
-        validate with ClinVar/ACMG criteria and MaxEntScan/SpliceAI.
-      </div>
-    </div>
-  );
-}
-
-/* ── var grid ──────────────────────────────────────────────────── */
-function VarGrid({ r }) {
-  const rows = [
-    ["CHR",     r.chrom,                       T.blue],
-    ["POS",     r.position?.toLocaleString(),   T.soft],
-    ["REF",     r.ref,                          T.lime],
-    ["ALT",     r.alt,                          T.amber],
-    ["TYPE",    r.mutation_type,                mutColor(r.mutation_type)],
-    ["TIME",    `${r.latency_ms}ms`,            T.muted],
-  ];
-  return (
-    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:6 }}>
-      {rows.map(([k,v,c])=>(
-        <div key={k} style={{
-          background:T.bg, borderRadius:4, padding:"9px 12px",
-          border:`1px solid ${T.wire}`,
-        }}>
-          <div style={{ fontFamily:MON, fontSize:7, color:T.muted, letterSpacing:1.5, marginBottom:3 }}>{k}</div>
-          <div style={{ fontFamily:MON, fontSize:12, fontWeight:700, color:c }}>{v}</div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/* ── PREDICTION CARD ───────────────────────────────────────────── */
+/* ═════════════════════════════════════════════════════════════
+   PREDICTION CARD  (XGB / DNABERT / Ensemble)
+═════════════════════════════════════════════════════════════ */
 function PredCard({ r, onClose }) {
-  const isPath = r.prediction === "Pathogenic";
-  const color  = isPath ? T.red : T.lime;
-  const [tab,  setTab] = useState("overview");
-  const TABS   = ["overview","rules","confidence"];
+  const isPath = r.prediction==="Pathogenic";
+  const color  = isPath?C.red:C.seq;
+  const [tab,setTab]=useState("overview");
 
   return (
-    <div style={{
-      background:T.paper, border:`1px solid ${color}33`,
-      borderRadius:8, overflow:"hidden",
-      animation:"slideUp 0.45s cubic-bezier(.16,1,.3,1)",
-      boxShadow:`0 0 60px ${color}0a, 0 0 120px ${color}05`,
-    }}>
-      {/* ── top bar ── */}
-      <div style={{
-        background:`linear-gradient(90deg, ${color}18 0%, transparent 70%)`,
-        borderBottom:`1px solid ${color}22`,
-        padding:"18px 22px",
-        display:"flex", alignItems:"center", gap:16,
-      }}>
-        {/* verdict */}
-        <div style={{ flex:1 }}>
-          <div style={{ fontFamily:MON, fontSize:8, color:T.muted, letterSpacing:3, marginBottom:4 }}>
+    <div style={{background:C.surface,border:`1px solid ${color}40`,borderRadius:8,overflow:"hidden",
+      animation:"cardIn 0.5s cubic-bezier(.16,1,.3,1)",boxShadow:`0 0 80px ${color}0c,0 4px 40px #00000088`}}>
+      <div style={{height:3,background:`linear-gradient(90deg,transparent,${color},transparent)`}}/>
+      {/* header */}
+      <div style={{padding:"20px 24px",background:`linear-gradient(135deg,${color}14 0%,transparent 60%)`,
+        borderBottom:`1px solid ${color}22`,display:"flex",alignItems:"center",gap:16}}>
+        <div style={{flex:1}}>
+          <div style={{fontFamily:F.mono,fontSize:7,color:C.ghost,letterSpacing:3,marginBottom:6}}>
             {r.model?.toUpperCase()} · {r.latency_ms}ms
           </div>
-          <div style={{ display:"flex", alignItems:"baseline", gap:12 }}>
-            <span style={{ fontFamily:DIS, fontSize:32, color, lineHeight:1 }}>
-              {r.prediction}
-            </span>
-            <Chip label={r.confidence} color={color}/>
+          <div style={{display:"flex",alignItems:"baseline",gap:12,marginBottom:8}}>
+            <span style={{fontFamily:F.display,fontSize:38,color,lineHeight:1,fontStyle:"italic"}}>{r.prediction}</span>
+            <Tag label={r.confidence} color={color}/>
+            <Tag label={r.mutation_severity?.toUpperCase()||""} color={sevC(r.mutation_severity)}/>
+          </div>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+            <Tag label={r.mutation_type} color={mutC(r.mutation_type)}/>
+            <Tag label={`chr${r.chrom}:${r.position}`} color={C.ghost}/>
+            <Tag label={`${r.ref}→${r.alt}`} color={C.amber}/>
           </div>
         </div>
-        {/* gauge */}
         <Gauge prob={r.probability} isPath={isPath}/>
-        {/* close */}
-        <button onClick={onClose} style={{
-          background:"none", border:`1px solid ${T.wire}`,
-          borderRadius:4, color:T.muted, cursor:"pointer",
-          width:28, height:28, fontFamily:MON, fontSize:12,
-          alignSelf:"flex-start",
-        }}>✕</button>
+        <button onClick={onClose} style={{background:"none",border:`1px solid ${C.border}`,borderRadius:4,
+          color:C.ghost,cursor:"pointer",width:28,height:28,fontFamily:F.mono,fontSize:11,alignSelf:"flex-start",flexShrink:0}}>✕</button>
       </div>
 
-      <div style={{ padding:"20px 22px" }}>
-        {/* probability bar */}
-        <div style={{ marginBottom:18 }}>
-          <div style={{ display:"flex", justifyContent:"space-between", marginBottom:5 }}>
-            <span style={{ fontFamily:MON, fontSize:8, color:T.lime, letterSpacing:1 }}>BENIGN</span>
-            <span style={{ fontFamily:MON, fontSize:8, color:T.muted }}>
-              threshold {(r.threshold_used*100).toFixed(0)}%
-            </span>
-            <span style={{ fontFamily:MON, fontSize:8, color:T.red, letterSpacing:1 }}>PATHOGENIC</span>
+      <div style={{padding:"20px 24px"}}>
+        {/* prob spectrum */}
+        <div style={{marginBottom:18}}>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+            <span style={{fontFamily:F.mono,fontSize:7,color:C.seq,letterSpacing:1}}>← BENIGN</span>
+            <span style={{fontFamily:F.mono,fontSize:7,color:C.ghost}}>threshold {(r.threshold_used*100).toFixed(0)}%</span>
+            <span style={{fontFamily:F.mono,fontSize:7,color:C.red,letterSpacing:1}}>PATHOGENIC →</span>
           </div>
-          <div style={{ position:"relative", height:6, background:T.dim, borderRadius:1 }}>
-            <div style={{
-              position:"absolute", left:0, top:0, height:"100%",
-              width:`${r.probability*100}%`, borderRadius:1,
-              background:`linear-gradient(90deg, ${color}80, ${color})`,
-              transition:"width 0.9s cubic-bezier(.16,1,.3,1)",
-              boxShadow:`0 0 10px ${color}66`,
-            }}/>
-            {/* threshold tick */}
-            <div style={{
-              position:"absolute", top:-4, transform:"translateX(-50%)",
-              left:`${r.threshold_used*100}%`,
-              width:1, height:14, background:T.amber,
-              boxShadow:`0 0 6px ${T.amber}`,
-            }}/>
+          <div style={{position:"relative",height:8,background:C.dim,borderRadius:4}}>
+            <div style={{position:"absolute",inset:0,borderRadius:4,
+              background:`linear-gradient(90deg,${C.seq}66 0%,${C.teal}44 40%,${C.amber}44 60%,${C.red}88 100%)`,opacity:0.4}}/>
+            <div style={{position:"absolute",top:"50%",transform:"translate(-50%,-50%)",left:`${r.probability*100}%`,
+              width:12,height:12,borderRadius:"50%",background:color,border:"2px solid #000",
+              boxShadow:`0 0 12px ${color}`,transition:"left 0.9s cubic-bezier(.16,1,.3,1)"}}/>
+            <div style={{position:"absolute",top:-3,left:`${r.threshold_used*100}%`,transform:"translateX(-50%)",
+              width:1,height:14,background:C.amber,boxShadow:`0 0 6px ${C.amber}`}}/>
           </div>
-        </div>
-
-        {/* mutation badges */}
-        <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:16 }}>
-          <Chip label={r.mutation_type} color={mutColor(r.mutation_type)}/>
-          <Chip label={`chr${r.chrom}:${r.position} ${r.ref}→${r.alt}`} color={T.ghost}/>
+          <div style={{display:"flex",justifyContent:"space-between",marginTop:3}}>
+            <span style={{fontFamily:F.mono,fontSize:7,color:C.muted}}>0%</span>
+            <span style={{fontFamily:F.mono,fontSize:7,color:C.muted}}>100%</span>
+          </div>
         </div>
 
         {/* tabs */}
-        <div style={{
-          display:"flex", gap:0, borderBottom:`1px solid ${T.wire}`,
-          marginBottom:16,
-        }}>
-          {TABS.map(t => (
-            <button key={t} onClick={()=>setTab(t)} style={{
-              background:"none", border:"none", cursor:"pointer",
-              fontFamily:MON, fontSize:9, letterSpacing:1.5, textTransform:"uppercase",
-              color: tab===t ? color : T.muted,
-              borderBottom: tab===t ? `1px solid ${color}` : "1px solid transparent",
-              padding:"7px 16px", marginBottom:-1, transition:"color 0.2s",
-            }}>{t}</button>
+        <div style={{display:"flex",borderBottom:`1px solid ${C.border}`,marginBottom:18}}>
+          {["overview","mechanism","model"].map(t=>(
+            <button key={t} onClick={()=>setTab(t)} style={{background:"none",border:"none",cursor:"pointer",
+              fontFamily:F.mono,fontSize:8,letterSpacing:1.5,textTransform:"uppercase",
+              color:tab===t?color:C.ghost,borderBottom:tab===t?`2px solid ${color}`:"2px solid transparent",
+              padding:"8px 16px",marginBottom:-1,transition:"color 0.2s"}}>{t}</button>
           ))}
         </div>
 
-        {tab==="overview" && (
+        {tab==="overview"&&(
           <div>
-            {/* mechanism */}
-            <div style={{
-              padding:"12px 14px", background:T.bg,
-              borderRadius:4, borderLeft:`2px solid ${color}`,
-              marginBottom:14,
-            }}>
-              <SectionLabel>Molecular mechanism</SectionLabel>
-              <p style={{ fontFamily:MON, fontSize:11, color:T.soft, lineHeight:1.9, margin:0 }}>
-                {r.mechanism}
-              </p>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:16}}>
+              {[["CHROMOSOME",`chr${r.chrom}`,C.teal],["POSITION",r.position?.toLocaleString(),C.silver],
+                ["REF → ALT",`${r.ref} → ${r.alt}`,C.amber],["MODEL",r.model?.split(" ")[0],C.ghost],
+                ["PROBABILITY",`${(r.probability*100).toFixed(2)}%`,color],["LATENCY",`${r.latency_ms}ms`,C.ghost],
+              ].map(([k,v,c])=>(
+                <div key={k} style={{background:C.deep,borderRadius:4,padding:"10px 13px",border:`1px solid ${C.border}`}}>
+                  <div style={{fontFamily:F.mono,fontSize:6,color:C.muted,letterSpacing:1.5,marginBottom:4}}>{k}</div>
+                  <div style={{fontFamily:F.mono,fontSize:12,fontWeight:700,color:c}}>{v}</div>
+                </div>
+              ))}
             </div>
-            <VarGrid r={r}/>
+            <div style={{padding:"12px 14px",background:C.deep,borderRadius:5,border:`1px solid ${C.border}`}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}>
+                <div>
+                  <div style={{fontFamily:F.mono,fontSize:7,color:C.ghost,letterSpacing:2,marginBottom:3}}>CONFIDENCE</div>
+                  <div style={{fontFamily:F.display,fontSize:24,color,fontStyle:"italic"}}>{r.confidence}</div>
+                </div>
+                <div style={{textAlign:"right"}}>
+                  <div style={{fontFamily:F.mono,fontSize:7,color:C.ghost,letterSpacing:2,marginBottom:3}}>MARGIN</div>
+                  <div style={{fontFamily:F.mono,fontSize:20,fontWeight:700,color:C.amber}}>
+                    {(Math.abs(r.probability-r.threshold_used)*100).toFixed(1)}pp
+                  </div>
+                </div>
+              </div>
+              <Bar val={Math.abs(r.probability-r.threshold_used)} max={0.5} color={C.amber} h={4} label="DISTANCE FROM DECISION BOUNDARY"/>
+              <div style={{marginTop:8,fontFamily:F.mono,fontSize:8,color:C.ghost,lineHeight:1.8}}>
+                {Math.abs(r.probability-r.threshold_used)<0.1
+                  ?"⚠ Near-boundary — treat with caution. Run splice site analysis for confirmation."
+                  :Math.abs(r.probability-r.threshold_used)<0.3
+                  ?"Moderate separation. Ensemble model will provide additional confidence."
+                  :"Strong separation from decision boundary — high model certainty."}
+              </div>
+            </div>
           </div>
         )}
-        {tab==="rules"      && <Rules r={r}/>}
-        {tab==="confidence" && <Confidence prob={r.probability} thresh={r.threshold_used}/>}
+
+        {tab==="mechanism"&&(
+          <div style={{padding:"14px 16px",background:C.deep,borderRadius:5,borderLeft:`3px solid ${sevC(r.mutation_severity)}`}}>
+            <div style={{display:"flex",gap:8,marginBottom:10}}>
+              <Tag label={r.mutation_type} color={mutC(r.mutation_type)}/>
+              <Tag label={`severity: ${r.mutation_severity}`} color={sevC(r.mutation_severity)}/>
+            </div>
+            <Sep label="Molecular mechanism"/>
+            <p style={{fontFamily:F.mono,fontSize:10,color:C.silver,lineHeight:2,margin:0}}>{r.mechanism}</p>
+          </div>
+        )}
+
+        {tab==="model"&&(
+          <div>
+            <Sep label="How the model processed this variant"/>
+            <div style={{fontFamily:F.mono,fontSize:9,color:C.ghost,lineHeight:2,marginBottom:12}}>
+              {(r.model?.includes("XGBoost")||r.model?.includes("Ensemble"))&&(
+                <><span style={{color:C.amber}}>XGBoost k-mer features: </span>
+                The 200bp reference and alternate sequences are decomposed into overlapping 6-mers.
+                Frequency vectors of 4,096 dimensions are computed, plus direction, magnitude,
+                variant type and biological flags — 12,301 features total.
+                XGBoost learned which k-mer frequency shifts predict pathogenicity from ~60k balanced variants.<br/><br/></>
+              )}
+              {(r.model?.includes("DNABERT")||r.model?.includes("Ensemble"))&&(
+                <><span style={{color:C.seq}}>DNABERT-2 sequence encoding: </span>
+                The reference and alternate 200bp windows are tokenised with Byte Pair Encoding
+                and passed through a 117M-parameter bidirectional transformer pretrained on the human genome.
+                The [CLS] token embedding captures global sequence context attending to conserved splice signals,
+                ESE motifs, and local sequence grammar.</>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-/* ── stat pill ─────────────────────────────────────────────────── */
-function Pill({ label, val, color }) {
-  const active = val > 0;
-  return (
-    <div style={{
-      flex:1, minWidth:80, textAlign:"center",
-      padding:"10px 10px", borderRadius:4,
-      background: active ? `${color}12` : T.bg,
-      border:`1px solid ${active ? color+"44" : T.wire}`,
-    }}>
-      <div style={{ fontFamily:MON, fontSize:20, fontWeight:700, color:active?color:T.muted }}>{val}</div>
-      <div style={{ fontFamily:MON, fontSize:7, color:T.muted, marginTop:3, lineHeight:1.5, letterSpacing:0.5 }}>{label}</div>
-    </div>
-  );
-}
-
-/* ── SPLICE CARD ───────────────────────────────────────────────── */
+/* ═════════════════════════════════════════════════════════════
+   SPLICE SITES CARD
+═════════════════════════════════════════════════════════════ */
 function SpliceCard({ r, onClose }) {
-  const sc = sigColor(r.pathogenicity_signal);
-  const [showAll, setShowAll] = useState(false);
-  const [tab, setTab] = useState("sites");
-  const visible = showAll ? r.sites : r.sites?.slice(0,6) || [];
+  const sc=sigC(r.pathogenicity_signal);
+  const [showAll,setShowAll]=useState(false);
+  const [tab,setTab]=useState("sites");
+  const visible=showAll?r.sites:(r.sites||[]).slice(0,6);
+  const donorNet=(r.alt_active_donors||0)-(r.ref_active_donors||0);
+  const accNet  =(r.alt_active_acceptors||0)-(r.ref_active_acceptors||0);
 
   return (
-    <div style={{
-      background:T.paper, border:`1px solid ${sc}33`,
-      borderRadius:8, overflow:"hidden",
-      animation:"slideUp 0.45s cubic-bezier(.16,1,.3,1)",
-      boxShadow:`0 0 60px ${sc}08`,
-    }}>
+    <div style={{background:C.surface,border:`1px solid ${sc}40`,borderRadius:8,overflow:"hidden",
+      animation:"cardIn 0.5s cubic-bezier(.16,1,.3,1)",boxShadow:`0 0 80px ${sc}0c,0 4px 40px #00000088`}}>
+      <div style={{height:3,background:`linear-gradient(90deg,transparent,${sc},transparent)`}}/>
+
       {/* header */}
-      <div style={{
-        background:`linear-gradient(90deg, ${sc}15 0%, transparent 70%)`,
-        borderBottom:`1px solid ${sc}22`,
-        padding:"18px 22px",
-        display:"flex", alignItems:"flex-start", gap:12,
-      }}>
-        <div style={{ flex:1 }}>
-          <div style={{ fontFamily:MON, fontSize:8, color:T.muted, letterSpacing:3, marginBottom:5 }}>
-            SPLICE SITE ANALYSIS · {r.latency_ms}ms · {r.sites_found} sites scored
+      <div style={{padding:"20px 24px",background:`linear-gradient(135deg,${sc}14 0%,transparent 60%)`,
+        borderBottom:`1px solid ${sc}22`,display:"flex",alignItems:"flex-start",gap:12}}>
+        <div style={{flex:1}}>
+          <div style={{fontFamily:F.mono,fontSize:7,color:C.ghost,letterSpacing:3,marginBottom:6}}>
+            SPLICE SITE ANALYSIS · {r.latency_ms}ms · {r.sites_found} sites evaluated
           </div>
-          <div style={{ fontFamily:DIS, fontSize:22, color:sc, lineHeight:1.2, marginBottom:5 }}>
+          <div style={{fontFamily:F.display,fontSize:22,color:sc,lineHeight:1.2,marginBottom:8,fontStyle:"italic"}}>
             {r.pathogenicity_signal}
           </div>
-          <div style={{ fontFamily:MON, fontSize:10, color:T.muted }}>
-            {r.summary}
+          <div style={{fontFamily:F.mono,fontSize:9,color:C.slate,marginBottom:10}}>{r.summary}</div>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+            <Tag label={r.mutation_type} color={mutC(r.mutation_type)}/>
+            <Tag label={r.mutation_detail} color={C.ghost}/>
+            <Tag label={`severity: ${r.mutation_severity}`} color={sevC(r.mutation_severity)}/>
           </div>
         </div>
-        <button onClick={onClose} style={{
-          background:"none", border:`1px solid ${T.wire}`, borderRadius:4,
-          color:T.muted, cursor:"pointer", width:28, height:28,
-          fontFamily:MON, fontSize:12, flexShrink:0,
-        }}>✕</button>
+        <button onClick={onClose} style={{background:"none",border:`1px solid ${C.border}`,borderRadius:4,
+          color:C.ghost,cursor:"pointer",width:28,height:28,fontFamily:F.mono,fontSize:11,flexShrink:0}}>✕</button>
       </div>
 
-      <div style={{ padding:"20px 22px" }}>
-        {/* mutation box */}
-        <div style={{
-          padding:"12px 14px", background:T.bg, borderRadius:4,
-          borderLeft:`2px solid ${mutColor(r.mutation_type)}`,
-          marginBottom:16,
-        }}>
-          <div style={{ display:"flex", gap:8, alignItems:"center", marginBottom:6 }}>
-            <Chip label={r.mutation_type} color={mutColor(r.mutation_type)}/>
-            <span style={{ fontFamily:MON, fontSize:10, color:T.muted }}>{r.mutation_detail}</span>
-          </div>
-          <p style={{ fontFamily:MON, fontSize:11, color:T.soft, lineHeight:1.9, margin:0 }}>
-            {r.mutation_mechanism}
-          </p>
+      <div style={{padding:"20px 24px"}}>
+        {/* active site counters */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:8,marginBottom:16}}>
+          {[["Active Donors REF",r.ref_active_donors||0,C.ghost],
+            ["Active Donors ALT",r.alt_active_donors||0,donorNet<0?C.red:donorNet>0?C.seq:C.ghost],
+            ["Active Acceptors REF",r.ref_active_acceptors||0,C.ghost],
+            ["Active Acceptors ALT",r.alt_active_acceptors||0,accNet<0?C.red:accNet>0?C.seq:C.ghost],
+          ].map(([lbl,val,col])=>(
+            <div key={lbl} style={{padding:"9px 12px",background:C.deep,borderRadius:4,border:`1px solid ${C.border}`}}>
+              <div style={{fontFamily:F.mono,fontSize:6,color:C.muted,letterSpacing:1,marginBottom:3}}>{lbl}</div>
+              <div style={{fontFamily:F.mono,fontSize:18,fontWeight:700,color:col}}>{val}</div>
+            </div>
+          ))}
         </div>
 
         {/* stat pills */}
-        <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:16 }}>
-          <Pill label="Disrupted Donors"    val={r.disrupted_donors}    color={T.red}/>
-          <Pill label="Disrupted Acceptors" val={r.disrupted_acceptors} color={T.red}/>
-          <Pill label="New Donors"          val={r.created_donors}      color={T.lime}/>
-          <Pill label="New Acceptors"       val={r.created_acceptors}   color={T.lime}/>
-          <Pill label="Cryptic Donors"      val={r.cryptic_donors}      color={T.amber}/>
-          <Pill label="Cryptic Acceptors"   val={r.cryptic_acceptors}   color={T.amber}/>
+        <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:14}}>
+          {[["Disrupted Donors",r.disrupted_donors,C.red],["Disrupted Acceptors",r.disrupted_acceptors,C.red],
+            ["De Novo Donors",r.created_donors,C.seq],["De Novo Acceptors",r.created_acceptors,C.seq],
+            ["Cryptic Donors",r.cryptic_donors,C.purple],["Cryptic Acceptors",r.cryptic_acceptors,C.purple],
+          ].map(([lbl,val,col])=>{
+            const active=val>0;
+            return (
+              <div key={lbl} style={{flex:1,minWidth:80,textAlign:"center",padding:"9px 8px",borderRadius:4,
+                background:active?`${col}14`:C.deep,border:`1px solid ${active?col+"44":C.border}`}}>
+                <div style={{fontFamily:F.mono,fontSize:18,fontWeight:700,color:active?col:C.muted}}>{val}</div>
+                <div style={{fontFamily:F.mono,fontSize:6,color:C.ghost,marginTop:3,lineHeight:1.5}}>{lbl}</div>
+              </div>
+            );
+          })}
         </div>
 
-        {/* max change bar */}
-        {r.max_disruption > 0 && (
-          <div style={{ marginBottom:16 }}>
-            <div style={{ display:"flex", justifyContent:"space-between", marginBottom:5 }}>
-              <span style={{ fontFamily:MON, fontSize:8, color:T.muted, letterSpacing:1 }}>MAX SCORE CHANGE</span>
-              <span style={{ fontFamily:MON, fontSize:9, fontWeight:700, color:sc }}>
-                {(r.max_disruption*100).toFixed(1)}%
-              </span>
-            </div>
-            <Bar val={r.max_disruption} color={sc} h={5}/>
+        {/* max disruption bar */}
+        {r.max_disruption>0&&(
+          <div style={{marginBottom:14}}>
+            <Bar val={r.max_disruption} color={sc} h={5} label="MAX PWM SCORE CHANGE"/>
           </div>
         )}
 
+        {/* context chips */}
+        <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
+          <div style={{padding:"7px 12px",background:C.deep,borderRadius:4,border:`1px solid ${C.border}`}}>
+            <div style={{fontFamily:F.mono,fontSize:6,color:C.muted,marginBottom:2}}>WINDOW GC%</div>
+            <div style={{fontFamily:F.mono,fontSize:13,color:C.amber,fontWeight:700}}>
+              {((r.window_gc||0)*100).toFixed(1)}%
+            </div>
+          </div>
+          <div style={{padding:"7px 12px",background:C.deep,borderRadius:4,border:`1px solid ${C.border}`}}>
+            <div style={{fontFamily:F.mono,fontSize:6,color:C.muted,marginBottom:2}}>POLYPYRIMIDINE TRACT</div>
+            <div style={{fontFamily:F.mono,fontSize:13,color:C.teal,fontWeight:700}}>
+              {((r.ppt_score||0)*100).toFixed(1)}% C/T
+            </div>
+          </div>
+        </div>
+
         {/* landscape */}
-        {r.sites?.length > 0 && <Landscape sites={r.sites}/>}
+        {r.sites?.length>0&&<SiteLandscape sites={r.sites}/>}
+
+        {/* mutation mechanism */}
+        <div style={{padding:"12px 14px",background:C.deep,borderRadius:5,
+          borderLeft:`3px solid ${mutC(r.mutation_type)}`,marginBottom:14}}>
+          <Sep label="Mutation mechanism"/>
+          <p style={{fontFamily:F.mono,fontSize:10,color:C.silver,lineHeight:2,margin:0}}>{r.mutation_mechanism}</p>
+        </div>
 
         {/* tabs */}
-        <div style={{ display:"flex", borderBottom:`1px solid ${T.wire}`, marginBottom:14 }}>
-          {["sites","variant"].map(t => (
-            <button key={t} onClick={()=>setTab(t)} style={{
-              background:"none", border:"none", cursor:"pointer",
-              fontFamily:MON, fontSize:9, letterSpacing:1.5, textTransform:"uppercase",
-              color: tab===t ? sc : T.muted,
-              borderBottom: tab===t ? `1px solid ${sc}` : "1px solid transparent",
-              padding:"7px 16px", marginBottom:-1, transition:"color 0.2s",
-            }}>{t}</button>
+        <div style={{display:"flex",borderBottom:`1px solid ${C.border}`,marginBottom:14}}>
+          {["sites","ese & bp","sequence"].map(t=>(
+            <button key={t} onClick={()=>setTab(t)} style={{background:"none",border:"none",cursor:"pointer",
+              fontFamily:F.mono,fontSize:8,letterSpacing:1.5,textTransform:"uppercase",
+              color:tab===t?sc:C.ghost,borderBottom:tab===t?`2px solid ${sc}`:"2px solid transparent",
+              padding:"8px 14px",marginBottom:-1,transition:"color 0.2s"}}>{t}</button>
           ))}
         </div>
 
-        {tab==="sites" && (
+        {tab==="sites"&&(
           <div>
-            {visible.length > 0 ? (
-              <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
-                {visible.map((s,i) => <SiteRow key={i} s={s} idx={i}/>)}
-              </div>
-            ) : (
-              <div style={{
-                fontFamily:MON, fontSize:11, color:T.muted, textAlign:"center",
-                padding:32, border:`1px dashed ${T.wire}`, borderRadius:6,
-              }}>
-                No significant splice site changes detected
-              </div>
-            )}
-            {r.sites?.length > 6 && (
-              <button onClick={()=>setShowAll(v=>!v)} style={{
-                marginTop:10, width:"100%",
-                background:"none", border:`1px solid ${T.wire}`,
-                borderRadius:4, color:T.muted,
-                fontFamily:MON, fontSize:9, padding:10,
-                cursor:"pointer",
-              }}>
-                {showAll ? "Show less ▲" : `Show all ${r.sites.length} sites ▼`}
+            {visible.length>0
+              ? <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                  {visible.map((s,i)=><SiteRow key={i} s={s} idx={i}/>)}
+                </div>
+              : <div style={{fontFamily:F.mono,fontSize:10,color:C.muted,textAlign:"center",
+                  padding:32,border:`1px dashed ${C.border}`,borderRadius:6}}>
+                  No significant splice site changes detected in this window
+                </div>
+            }
+            {(r.sites||[]).length>6&&(
+              <button onClick={()=>setShowAll(v=>!v)} style={{marginTop:10,width:"100%",background:"none",
+                border:`1px solid ${C.border}`,borderRadius:4,color:C.ghost,fontFamily:F.mono,fontSize:8,padding:10,cursor:"pointer"}}>
+                {showAll?`Show fewer ▲`:`Show all ${r.sites.length} sites ▼`}
               </button>
             )}
           </div>
         )}
 
-        {tab==="variant" && (
-          <div style={{ marginTop:4 }}>
-            <VarGrid r={{
-              ...r,
-              mutation_type: r.mutation_type,
-              latency_ms: r.latency_ms,
-            }}/>
+        {tab==="ese & bp"&&(
+          <div>
+            <ESEPanel findings={r.ese_findings}/>
+            <BranchPointPanel ref_bp={r.bp_candidates_ref} alt_bp={r.bp_candidates_alt}/>
+            {(!r.ese_findings?.length&&!r.bp_candidates_ref?.length&&!r.bp_candidates_alt?.length)&&(
+              <div style={{fontFamily:F.mono,fontSize:9,color:C.muted,textAlign:"center",padding:24}}>
+                No ESE disruptions or branch point candidates detected in this window
+              </div>
+            )}
+          </div>
+        )}
+
+        {tab==="sequence"&&(
+          <div>
+            <Sep label="200bp reference sequence window"/>
+            <div style={{background:C.abyss,borderRadius:4,padding:"12px 14px",border:`1px solid ${C.border}`,marginBottom:10}}>
+              <div style={{fontFamily:F.mono,fontSize:7,color:C.ghost,marginBottom:6}}>REF — variant position at center</div>
+              <DNAStrip seq={r.ref_seq_display||""} highlight={{start:95,end:105}}/>
+            </div>
+            <div style={{fontFamily:F.mono,fontSize:8,color:C.ghost,lineHeight:1.8}}>
+              <span style={{color:C.red}}>■</span> A &nbsp;
+              <span style={{color:C.amber}}>■</span> T &nbsp;
+              <span style={{color:C.seq}}>■</span> G &nbsp;
+              <span style={{color:C.teal}}>■</span> C
+            </div>
           </div>
         )}
       </div>
@@ -757,334 +665,240 @@ function SpliceCard({ r, onClose }) {
   );
 }
 
-/* ── input ─────────────────────────────────────────────────────── */
-function Input({ label, hint, required, mono: isMono, ...props }) {
-  const [focused, setF] = useState(false);
+/* ── form input ───────────────────────────────────────────── */
+function Field({ label, hint, required, value, onChange, placeholder, type, maxLength, tall }) {
+  const [focused,sf]=useState(false);
   return (
     <div>
-      <label style={{
-        fontFamily:MON, fontSize:8, letterSpacing:2, textTransform:"uppercase",
-        color:T.muted, marginBottom:5, display:"flex", gap:8, alignItems:"center",
-      }}>
-        {label}
-        {hint && (
-          <span style={{ color:required?T.amber:T.muted, textTransform:"none", letterSpacing:0 }}>
-            ({hint})
-          </span>
-        )}
-      </label>
-      <input {...props}
-        onFocus={e=>{ setF(true); props.onFocus?.(e); }}
-        onBlur={e=>{ setF(false); props.onBlur?.(e); }}
-        style={{
-          width:"100%", background:T.lift,
-          border:`1px solid ${focused ? T.lime+"66" : T.wire}`,
-          borderRadius:4, padding:"10px 13px", color:T.text,
-          fontFamily: isMono ? MON : MON, fontSize:12,
-          outline:"none", boxSizing:"border-box",
-          transition:"border-color 0.15s, box-shadow 0.15s",
-          boxShadow: focused ? `0 0 0 3px ${T.limeDim}` : "none",
-          ...props.style,
-        }}
-      />
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:5}}>
+        <label style={{fontFamily:F.mono,fontSize:7,letterSpacing:2,color:C.ghost,textTransform:"uppercase"}}>{label}</label>
+        {hint&&<span style={{fontFamily:F.mono,fontSize:7,color:required?C.amber:C.ghost}}>({hint})</span>}
+      </div>
+      {tall
+        ? <textarea value={value} onChange={onChange} placeholder={placeholder}
+            onFocus={()=>sf(true)} onBlur={()=>sf(false)}
+            style={{width:"100%",background:C.raised,border:`1px solid ${focused?C.amber+"88":C.border}`,
+              borderRadius:4,padding:"10px 13px",color:C.white,fontFamily:F.mono,fontSize:10,
+              letterSpacing:0.5,lineHeight:1.6,outline:"none",boxSizing:"border-box",resize:"none",height:70,
+              boxShadow:focused?`0 0 0 3px ${C.amber}18`:"none",transition:"border-color 0.15s,box-shadow 0.15s"}}/>
+        : <input type={type||"text"} value={value} onChange={onChange} placeholder={placeholder} maxLength={maxLength}
+            onFocus={()=>sf(true)} onBlur={()=>sf(false)}
+            style={{width:"100%",background:C.raised,border:`1px solid ${focused?C.amber+"88":C.border}`,
+              borderRadius:4,padding:"10px 13px",color:C.white,fontFamily:F.mono,fontSize:12,outline:"none",
+              boxSizing:"border-box",boxShadow:focused?`0 0 0 3px ${C.amber}18`:"none",
+              transition:"border-color 0.15s,box-shadow 0.15s"}}/>
+      }
     </div>
   );
 }
 
-/* ── health dot ────────────────────────────────────────────────── */
-function HDot({ ok, label }) {
+/* ── health dot ───────────────────────────────────────────── */
+function HealthDot({ ok, label }) {
   return (
-    <span style={{ display:"flex", alignItems:"center", gap:5 }}>
-      <span style={{
-        width:5, height:5, borderRadius:"50%",
-        display:"inline-block",
-        background:ok?T.lime:T.red,
-        boxShadow:ok?`0 0 6px ${T.lime}`:"none",
-      }}/>
-      <span style={{ fontFamily:MON, fontSize:8, color:ok?T.ghost:T.muted }}>
-        {label}
-      </span>
+    <span style={{display:"flex",alignItems:"center",gap:5}}>
+      <span style={{width:5,height:5,borderRadius:"50%",display:"inline-block",background:ok?C.seq:C.red,
+        boxShadow:ok?`0 0 8px ${C.seq}`:undefined,animation:ok?"healthPulse 3s infinite":undefined}}/>
+      <span style={{fontFamily:F.mono,fontSize:7,color:ok?C.ghost:C.muted}}>{label}</span>
     </span>
   );
 }
 
-/* ════════════════════════════════════════════════════════
+/* ═════════════════════════════════════════════════════════════
    MAIN APP
-   ════════════════════════════════════════════════════════ */
+═════════════════════════════════════════════════════════════ */
 export default function App() {
-  const [form,    setForm]    = useState({ chrom:"",position:"",ref:"",alt:"",ref_seq:"",alt_seq:"" });
-  const [mode,    setMode]    = useState("xgb");
-  const [loading, setLoading] = useState(false);
-  const [result,  setResult]  = useState(null);
-  const [error,   setError]   = useState(null);
-  const [health,  setHealth]  = useState(null);
-  const resultRef = useRef(null);
+  const [form,setForm]=useState({chrom:"",position:"",ref:"",alt:"",ref_seq:"",alt_seq:""});
+  const [mode,setMode]=useState("xgb");
+  const [loading,setLoading]=useState(false);
+  const [result,setResult]=useState(null);
+  const [error,setError]=useState(null);
+  const [health,setHealth]=useState(null);
+  const resultRef=useRef(null);
+  const set=k=>e=>setForm(f=>({...f,[k]:e.target.value}));
 
-  const set = k => e => setForm(f=>({...f,[k]:e.target.value}));
+  useEffect(()=>{ fetch(`${API}/health`).then(r=>r.json()).then(setHealth).catch(()=>{}); },[]);
+  useEffect(()=>{ if(result&&resultRef.current) resultRef.current.scrollIntoView({behavior:"smooth",block:"start"}); },[result]);
 
-  useEffect(() => {
-    fetch(`${API}/health`).then(r=>r.json()).then(setHealth).catch(()=>{});
-  }, []);
-
-  useEffect(() => {
-    if (result && resultRef.current)
-      resultRef.current.scrollIntoView({ behavior:"smooth", block:"nearest" });
-  }, [result]);
-
-  const run = async () => {
-    const { chrom, position, ref, alt } = form;
-    if (!chrom||!position||!ref||!alt) { setError("chrom, position, ref, alt are required."); return; }
-    if (mode==="splice_sites" && !form.ref_seq) { setError("ref_seq required for splice site analysis."); return; }
+  const run=async()=>{
+    const{chrom,position,ref,alt}=form;
+    if(!chrom||!position||!ref||!alt){ setError("Chromosome, position, REF and ALT are required."); return; }
+    if(mode==="splice_sites"&&!form.ref_seq){ setError("REF sequence (±200bp) is required for splice site analysis."); return; }
     setLoading(true); setError(null); setResult(null);
     try {
-      const body = {
-        chrom, position:parseInt(position),
-        ref:ref.toUpperCase(), alt:alt.toUpperCase(),
-        ref_seq:form.ref_seq||null, alt_seq:form.alt_seq||null,
-      };
-      const res = await fetch(`${API}/predict/${mode}`, {
-        method:"POST", headers:{"Content-Type":"application/json"},
-        body:JSON.stringify(body),
-      });
-      if (!res.ok) { const e=await res.json(); throw new Error(e.detail||`HTTP ${res.status}`); }
-      setResult({...await res.json(), _mode:mode});
-    } catch(e) { setError(e.message); }
-    finally    { setLoading(false); }
+      const body={chrom,position:parseInt(position),ref:ref.toUpperCase(),alt:alt.toUpperCase(),
+        ref_seq:form.ref_seq||null,alt_seq:form.alt_seq||null};
+      const res=await fetch(`${API}/predict/${mode}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+      if(!res.ok){ const e=await res.json(); throw new Error(e.detail||`HTTP ${res.status}`); }
+      setResult({...await res.json(),_mode:mode});
+    } catch(e){ setError(e.message); }
+    finally{ setLoading(false); }
   };
+
+  const loadExample=()=>{ setForm({...EX,alt_seq:""}); setResult(null); setError(null); };
 
   return (
     <>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Mona+Sans:wght@300;400;600&family=JetBrains+Mono:wght@400;500;700&display=swap');
-        *{box-sizing:border-box;margin:0;padding:0}
-        html,body{background:${T.bg};min-height:100vh;color:${T.text}}
-        input::placeholder{color:${T.muted};font-size:11px}
-        button{transition:opacity 0.15s} button:hover{opacity:0.82}
-        @keyframes slideUp{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:translateY(0)}}
-        @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+        @import url('https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400;1,600&family=DM+Sans:wght@300;400;500;600&family=Fira+Code:wght@400;500;600&display=swap');
+        *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+        html,body{background:${C.void};min-height:100vh;color:${C.cloud};-webkit-font-smoothing:antialiased}
+        ::selection{background:${C.amber}44;color:${C.white}}
+        input,textarea{color-scheme:dark}
+        input::placeholder,textarea::placeholder{color:${C.muted};font-size:11px}
+        ::-webkit-scrollbar{width:4px;height:4px}
+        ::-webkit-scrollbar-track{background:${C.abyss}}
+        ::-webkit-scrollbar-thumb{background:${C.dim};border-radius:2px}
+        button{transition:opacity 0.15s,transform 0.1s}
+        button:hover:not(:disabled){opacity:0.85}
+        button:active:not(:disabled){transform:scale(0.98)}
+        @keyframes cardIn{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:translateY(0)}}
+        @keyframes siteIn{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:translateX(0)}}
         @keyframes fadeIn{from{opacity:0}to{opacity:1}}
-        @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
         @keyframes spin{to{transform:rotate(360deg)}}
-        ::-webkit-scrollbar{width:4px}
-        ::-webkit-scrollbar-track{background:${T.bg}}
-        ::-webkit-scrollbar-thumb{background:${T.wire};border-radius:2px}
+        @keyframes healthPulse{0%,100%{opacity:1}50%{opacity:0.4}}
+        @keyframes glowPulse{0%,100%{box-shadow:0 0 8px ${C.amber}44}50%{box-shadow:0 0 20px ${C.amber}88,0 0 40px ${C.amber}22}}
+        @keyframes titleReveal{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
       `}</style>
 
-      {/* subtle grid background */}
-      <div style={{
-        position:"fixed", inset:0, pointerEvents:"none", zIndex:0,
-        backgroundImage:`
-          linear-gradient(${T.wire}40 1px, transparent 1px),
-          linear-gradient(90deg, ${T.wire}40 1px, transparent 1px)
-        `,
-        backgroundSize:"60px 60px",
-        maskImage:"radial-gradient(ellipse 80% 60% at 50% 0%, black 30%, transparent 100%)",
-        WebkitMaskImage:"radial-gradient(ellipse 80% 60% at 50% 0%, black 30%, transparent 100%)",
-      }}/>
+      {/* dot grid bg */}
+      <div style={{position:"fixed",inset:0,zIndex:0,pointerEvents:"none",
+        backgroundImage:`radial-gradient(circle,${C.dim}55 1px,transparent 1px)`,backgroundSize:"28px 28px",
+        maskImage:"radial-gradient(ellipse 100% 80% at 50% 0%,black 20%,transparent 100%)",
+        WebkitMaskImage:"radial-gradient(ellipse 100% 80% at 50% 0%,black 20%,transparent 100%)"}}/>
+      {/* top accent */}
+      <div style={{position:"fixed",top:0,left:0,right:0,height:1,zIndex:10,
+        background:`linear-gradient(90deg,transparent 5%,${C.amber}88 35%,${C.seq}88 65%,transparent 95%)`}}/>
 
-      {/* top glow */}
-      <div style={{
-        position:"fixed", top:0, left:"30%", right:"30%", height:1,
-        background:`linear-gradient(90deg, transparent, ${T.lime}60, transparent)`,
-        zIndex:1,
-      }}/>
+      <div style={{position:"relative",zIndex:2,minHeight:"100vh",display:"flex",justifyContent:"center",padding:"52px 20px 120px"}}>
+        <div style={{width:"100%",maxWidth:660}}>
 
-      <div style={{
-        position:"relative", zIndex:2,
-        minHeight:"100vh", display:"flex", justifyContent:"center",
-        padding:"56px 20px 100px",
-      }}>
-        <div style={{ width:"100%", maxWidth:620 }}>
-
-          {/* ── STATUS BAR ── */}
-          <div style={{
-            display:"flex", alignItems:"center", gap:14, marginBottom:40,
-            padding:"7px 14px", background:T.paper,
-            border:`1px solid ${T.wire}`, borderRadius:4,
-          }}>
-            <div style={{
-              width:5, height:5, borderRadius:"50%", background:T.lime,
-              boxShadow:`0 0 8px ${T.lime}`, animation:"pulse 2.5s infinite",
-            }}/>
-            <span style={{ fontFamily:MON, fontSize:8, letterSpacing:3, color:T.muted }}>
-              SPLICE VARIANT LAB · v4.0
-            </span>
-            {health && (
-              <div style={{ marginLeft:"auto", display:"flex", gap:14, alignItems:"center" }}>
-                <HDot ok={health.xgb}     label="XGB"/>
-                <HDot ok={health.dnabert} label="DNA"/>
-                <span style={{ fontFamily:MON, fontSize:7, color:T.muted }}>
-                  τ={health.xgb_threshold?.toFixed(3)}
+          {/* status bar */}
+          <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:44,padding:"7px 14px",
+            background:C.surface,border:`1px solid ${C.border}`,borderRadius:4}}>
+            <div style={{width:5,height:5,borderRadius:"50%",background:C.seq,
+              animation:"healthPulse 3s infinite",boxShadow:`0 0 8px ${C.seq}`}}/>
+            <span style={{fontFamily:F.mono,fontSize:7,letterSpacing:3,color:C.ghost}}>SPLICE VARIANT LAB · v6.1</span>
+            {health&&(
+              <div style={{marginLeft:"auto",display:"flex",gap:14,alignItems:"center"}}>
+                <HealthDot ok={health.xgb}     label="XGB"/>
+                <HealthDot ok={health.dnabert} label="BERT"/>
+                <div style={{width:1,height:10,background:C.border}}/>
+                <span style={{fontFamily:F.mono,fontSize:6,color:C.muted}}>
+                  τ<sub>xgb</sub>={health.xgb_threshold?.toFixed(3)}
                 </span>
-                <span style={{ fontFamily:MON, fontSize:7, color:T.muted, textTransform:"uppercase" }}>
-                  {health.device}
-                </span>
+                <span style={{fontFamily:F.mono,fontSize:6,color:C.muted,textTransform:"uppercase"}}>{health.device}</span>
               </div>
             )}
           </div>
 
-          {/* ── HEADING ── */}
-          <div style={{ marginBottom:48 }}>
-            <h1 style={{
-              fontFamily:DIS, fontSize:62, fontWeight:400, italic:true,
-              color:T.bright, letterSpacing:-1, lineHeight:0.95,
-              marginBottom:14,
-            }}>
-              <span style={{ fontStyle:"italic" }}>Splice</span><br/>
-              <span style={{
-                WebkitBackgroundClip:"text",
-                WebkitTextFillColor:"transparent",
-                backgroundImage:`linear-gradient(135deg, ${T.lime}, ${T.blue})`,
-                backgroundClip:"text",
-              }}>Variant Lab</span>
+          {/* hero */}
+          <div style={{marginBottom:52,animation:"titleReveal 0.7s ease"}}>
+            <div style={{fontFamily:F.mono,fontSize:7,letterSpacing:4,color:C.amber,marginBottom:12,textTransform:"uppercase"}}>
+              ◈ Self-supervised splice site disruption predictor
+            </div>
+            <h1 style={{fontFamily:F.display,fontSize:"clamp(44px,8vw,68px)",fontWeight:400,
+              lineHeight:0.9,letterSpacing:-1,marginBottom:18,color:C.white}}>
+              <span style={{fontStyle:"italic"}}>Splice</span><br/>
+              <span style={{fontStyle:"italic",background:`linear-gradient(135deg,${C.amber},${C.seq} 60%)`,
+                WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>Variant Lab</span>
             </h1>
-            <p style={{
-              fontFamily:MON, fontSize:9, color:T.muted,
-              lineHeight:2.1, letterSpacing:0.5,
-            }}>
-              XGBoost k-mer features · DNABERT-2-117M sequence encoding<br/>
-              PWM donor/acceptor scoring · Cryptic splice site detection
-            </p>
+            <div style={{fontFamily:F.mono,fontSize:8,color:C.ghost,lineHeight:2.2,letterSpacing:0.3}}>
+              XGBoost 6-mer k-mer features (12,301 dims) · DNABERT-2-117M bidirectional transformer<br/>
+              PWM donor/acceptor scoring · ESE SR-protein binding · Branch point detection · Cryptic site activation
+            </div>
           </div>
 
-          {/* ── MODE SELECTOR ── */}
-          <div style={{ marginBottom:24 }}>
-            <div style={{ fontFamily:MON, fontSize:8, color:T.muted, letterSpacing:3, marginBottom:10 }}>
-              ANALYSIS MODE
-            </div>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:7 }}>
-              {MODES.map(m => (
+          {/* mode selector */}
+          <div style={{marginBottom:20}}>
+            <div style={{fontFamily:F.mono,fontSize:7,color:C.ghost,letterSpacing:3,marginBottom:10,textTransform:"uppercase"}}>Analysis mode</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6}}>
+              {MODES.map(m=>(
                 <button key={m.id} onClick={()=>setMode(m.id)} style={{
-                  background: mode===m.id ? T.lift : T.paper,
-                  border:`1px solid ${mode===m.id ? T.lime+"66" : T.wire}`,
-                  borderRadius:5, padding:"12px 8px", cursor:"pointer",
-                  boxShadow: mode===m.id ? `0 0 20px ${T.lime}0f, inset 0 0 0 1px ${T.lime}20` : "none",
-                  transition:"all 0.2s",
-                  textAlign:"left",
-                }}>
-                  <div style={{
-                    fontFamily:MON, fontSize:14, color:mode===m.id?T.lime:T.muted,
-                    marginBottom:4, lineHeight:1,
-                  }}>{m.glyph}</div>
-                  <div style={{
-                    fontFamily:SAN, fontWeight:600, fontSize:12,
-                    color:mode===m.id?T.bright:T.soft,
-                    marginBottom:2,
-                  }}>{m.label}</div>
-                  <div style={{ fontFamily:MON, fontSize:8, color:T.muted, letterSpacing:0.5 }}>
-                    {m.tag}
-                  </div>
+                  background:mode===m.id?C.raised:C.surface,
+                  border:`1px solid ${mode===m.id?m.color+"66":C.border}`,
+                  borderRadius:5,padding:"13px 10px",cursor:"pointer",textAlign:"left",
+                  boxShadow:mode===m.id?`0 0 24px ${m.color}14,inset 0 0 0 1px ${m.color}22`:"none",
+                  transition:"all 0.2s"}}>
+                  <div style={{fontFamily:F.mono,fontSize:15,color:mode===m.id?m.color:C.muted,marginBottom:5,lineHeight:1}}>{m.icon}</div>
+                  <div style={{fontFamily:F.sans,fontWeight:600,fontSize:12,color:mode===m.id?C.white:C.silver,marginBottom:3}}>{m.label}</div>
+                  <div style={{fontFamily:F.mono,fontSize:7,color:C.muted,letterSpacing:0.3}}>{m.sub}</div>
                 </button>
               ))}
             </div>
           </div>
 
-          {/* ── FORM ── */}
-          <div style={{
-            background:T.paper, border:`1px solid ${T.wire}`,
-            borderRadius:6, padding:"20px 22px", marginBottom:14,
-          }}>
-            <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 2fr", gap:10 }}>
-                <Input label="Chromosome" value={form.chrom} onChange={set("chrom")} placeholder="1"/>
-                <Input label="Position" type="number" value={form.position} onChange={set("position")} placeholder="925952"/>
+          {/* form */}
+          <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:6,padding:"20px 22px",marginBottom:12}}>
+            <div style={{display:"flex",flexDirection:"column",gap:12}}>
+              <div style={{display:"grid",gridTemplateColumns:"120px 1fr",gap:10}}>
+                <Field label="Chromosome" value={form.chrom} onChange={set("chrom")} placeholder="1"/>
+                <Field label="Position (GRCh38)" type="number" value={form.position} onChange={set("position")} placeholder="925952"/>
               </div>
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
-                <Input label="REF Allele" value={form.ref} onChange={set("ref")} placeholder="G" maxLength={50}/>
-                <Input label="ALT Allele" value={form.alt} onChange={set("alt")} placeholder="A" maxLength={50}/>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                <Field label="REF allele" value={form.ref} onChange={set("ref")} placeholder="G" maxLength={50}/>
+                <Field label="ALT allele" value={form.alt} onChange={set("alt")} placeholder="A" maxLength={50}/>
               </div>
-              <Input
-                label="REF Sequence ±200bp"
-                hint={mode==="splice_sites"?"required for splice analysis":"optional — improves accuracy"}
+              <Field label="REF sequence ±200bp"
+                hint={mode==="splice_sites"?"required":"optional — improves accuracy"}
                 required={mode==="splice_sites"}
                 value={form.ref_seq} onChange={set("ref_seq")}
-                placeholder="Genomic window around variant…"
-                style={{ fontSize:10, letterSpacing:0.3 }}
-              />
-              <Input
-                label="ALT Sequence"
-                hint="auto-built from REF if blank"
+                placeholder="Genomic context window centered on variant position…" tall/>
+              <Field label="ALT sequence"
+                hint="auto-constructed from REF if blank"
                 value={form.alt_seq} onChange={set("alt_seq")}
-                placeholder="Leave blank to auto-compute…"
-                style={{ fontSize:10 }}
-              />
+                placeholder="Leave blank — mutation will be applied to REF automatically" tall/>
             </div>
-
-            <div style={{ display:"flex", gap:8, marginTop:18 }}>
+            <div style={{display:"flex",gap:8,marginTop:18}}>
               <button onClick={run} disabled={loading} style={{
-                flex:1, padding:"13px 0",
-                background: loading
-                  ? T.lift
-                  : `linear-gradient(135deg, ${T.lime}dd, ${T.blue}cc)`,
-                border:`1px solid ${loading ? T.wire : T.lime+"55"}`,
-                borderRadius:5,
-                color: loading ? T.muted : T.bg,
-                fontFamily:SAN, fontWeight:700, fontSize:14,
-                cursor:loading?"not-allowed":"pointer",
-                display:"flex", alignItems:"center", justifyContent:"center", gap:9,
-                boxShadow: loading ? "none" : `0 0 30px ${T.lime}20`,
-                transition:"all 0.2s",
-              }}>
-                {loading ? (
-                  <>
-                    <div style={{
-                      width:13, height:13,
-                      border:`2px solid ${T.muted}`,
-                      borderTopColor:T.lime,
-                      borderRadius:"50%",
-                      animation:"spin 0.55s linear infinite",
-                    }}/>
-                    Analysing…
-                  </>
-                ) : "Run Analysis →"}
+                flex:1,padding:"13px 0",
+                background:loading?C.raised:`linear-gradient(135deg,${C.amber}ee,${C.seq}cc)`,
+                border:`1px solid ${loading?C.border:C.amber+"44"}`,borderRadius:5,
+                color:loading?C.muted:C.void,fontFamily:F.sans,fontWeight:700,fontSize:14,
+                cursor:loading?"not-allowed":"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:10,
+                boxShadow:loading?"none":`0 0 40px ${C.amber}18`,transition:"all 0.2s",
+                animation:loading?"none":"glowPulse 3s infinite"}}>
+                {loading
+                  ? <><div style={{width:14,height:14,border:`2px solid ${C.muted}`,borderTopColor:C.amber,
+                      borderRadius:"50%",animation:"spin 0.6s linear infinite"}}/>Analysing sequence…</>
+                  : "Run Analysis →"
+                }
               </button>
-              <button onClick={()=>{ setForm({...EX,alt_seq:""}); setResult(null); setError(null); }} style={{
-                padding:"13px 18px", background:T.lift,
-                border:`1px solid ${T.wire}`, borderRadius:5,
-                color:T.ghost, fontFamily:MON, fontSize:9, cursor:"pointer",
-              }}>
+              <button onClick={loadExample} style={{padding:"13px 18px",background:C.raised,
+                border:`1px solid ${C.border}`,borderRadius:5,color:C.ghost,fontFamily:F.mono,fontSize:8,cursor:"pointer"}}>
                 Example
               </button>
-              {result && (
-                <button onClick={()=>setResult(null)} style={{
-                  padding:"13px 18px", background:T.lift,
-                  border:`1px solid ${T.wire}`, borderRadius:5,
-                  color:T.ghost, fontFamily:MON, fontSize:9, cursor:"pointer",
-                }}>
+              {result&&(
+                <button onClick={()=>setResult(null)} style={{padding:"13px 18px",background:C.raised,
+                  border:`1px solid ${C.border}`,borderRadius:5,color:C.ghost,fontFamily:F.mono,fontSize:8,cursor:"pointer"}}>
                   Clear
                 </button>
               )}
             </div>
           </div>
 
-          {/* ── ERROR ── */}
-          {error && (
-            <div style={{
-              marginBottom:14, padding:"12px 16px",
-              background:`${T.red}10`, border:`1px solid ${T.red}44`,
-              borderRadius:5, color:T.red, fontFamily:MON, fontSize:11,
-              animation:"fadeIn 0.2s ease",
-            }}>
+          {/* error */}
+          {error&&(
+            <div style={{marginBottom:12,padding:"12px 16px",background:C.redDim,border:`1px solid ${C.red}55`,
+              borderRadius:5,color:C.red,fontFamily:F.mono,fontSize:10,animation:"fadeIn 0.2s ease"}}>
               ⚠ {error}
             </div>
           )}
 
-          {/* ── RESULT ── */}
-          {result && (
-            <div ref={resultRef}>
-              {result._mode==="splice_sites"
+          {/* result */}
+          <div ref={resultRef} style={{scrollMarginTop:24}}>
+            {result&&(
+              result._mode==="splice_sites"
                 ? <SpliceCard r={result} onClose={()=>setResult(null)}/>
-                : <PredCard   r={result} onClose={()=>setResult(null)}/>}
-            </div>
-          )}
+                : <PredCard   r={result} onClose={()=>setResult(null)}/>
+            )}
+          </div>
 
-          {/* ── FOOTER ── */}
-          <div style={{
-            marginTop:60, textAlign:"center",
-            fontFamily:MON, fontSize:7, color:T.wire, letterSpacing:2, lineHeight:2.5,
-          }}>
-            {API} · XGBoost k-mer · DNABERT-2-117M · PWM splice scoring<br/>
-            Not for clinical use · Validate with ClinVar / ACMG / MaxEntScan
+          {/* footer */}
+          <div style={{marginTop:72,paddingTop:24,borderTop:`1px solid ${C.border}`,textAlign:"center",
+            fontFamily:F.mono,fontSize:6,color:C.dim,letterSpacing:2,lineHeight:3}}>
+            {API} · XGBoost 12,301-dim k-mer · DNABERT-2-117M · PWM donor/acceptor · ESE SR-protein · Branch point adenosine<br/>
+            AUC 0.999 (XGB) · AUC 0.996 (DNABERT-2) · Trained on 99,310 balanced splice variants · GRCh38<br/>
+            <span style={{color:C.amber+"80"}}>Not for clinical use · Validate with ClinVar / ACMG / MaxEntScan / SpliceAI</span>
           </div>
 
         </div>

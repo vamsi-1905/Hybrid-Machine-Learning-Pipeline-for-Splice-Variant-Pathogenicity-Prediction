@@ -27,9 +27,9 @@ from sklearn.model_selection import train_test_split
 
 # ── Paths — edit these ────────────────────────────────────────────────
 BASE_DIR   = r"C:\Users\vamsi\Downloads\SEM 3\BIO\ibs_project_full\ibs_lab"
-CSV_PATH   = os.path.join(BASE_DIR, "splice_dataset_ACTUALLY_balanced.csv")   # ← balanced
+CSV_PATH   = os.path.join(BASE_DIR, "splice_dataset_ACTUALLY_v2_balanced.csv")   # ← balanced
 FASTA_PATH = os.path.join(BASE_DIR, "Homo_sapiens.GRCh38.dna.primary_assembly.fa")
-OUT_PATH   = os.path.join(BASE_DIR, "splice_windows.parquet")
+OUT_PATH   = os.path.join(BASE_DIR, "splice_windows_2.parquet")
 SKIP_PATH  = os.path.join(BASE_DIR, "skipped.csv")
 
 WINDOWS    = [50, 100, 200]

@@ -18,8 +18,8 @@ from tqdm import tqdm
 from itertools import product
 
 # ── CONFIG ─────────────────────────────────────────────────────────────────────
-IN_PATH  = "splice_windows.parquet"
-OUT_PATH = "features.parquet"
+IN_PATH  = "splice_windows_2.parquet"
+OUT_PATH = "features_2.parquet"
 K        = 6
 WINDOW   = 200
 # ──────────────────────────────────────────────────────────────────────────────
