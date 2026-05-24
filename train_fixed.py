@@ -1,20 +1,4 @@
-"""
-train.py — XGBoost v3 (overfitting fix)
 
-ROOT CAUSE: repair.py duplicated the 1,231 real benign rows ~40x to create
-50,388 synthetic benign rows. The random train/val/test split then placed
-near-identical copies of every real row across all three splits. The model
-learned "is this sequence near-identical to a training row" rather than
-splice biology, giving AUC 0.999 — which is meaningless.
-
-FIXES APPLIED:
-  1. Deduplicate on chrom+pos+ref+alt before splitting
-  2. Chromosome-based split: test=chr8+21, val=chr7+chrX, train=rest
-     → guarantees zero sequence leakage between splits
-  3. Heavy regularisation: shallower trees, higher weight penalties
-  4. Aggressive early stopping (30 rounds)
-  5. Explicit train-val AUC gap check — flags overfitting
-"""
 
 import json
 import numpy as np
@@ -34,7 +18,6 @@ MODEL_OUT   = "xgb_model.json"
 RESULTS_OUT = "xgb_results.json"
 THRESH_OUT  = "xgb_threshold.json"
 
-# ── Regularisation (conservative to fight memorisation) ───────────────
 EARLY_STOP  = 30
 N_EST       = 500
 MAX_DEPTH   = 4      # was 6 — shallower = less memorisation
